@@ -1,0 +1,30 @@
+# BOBO Simulator Requirements
+# This simulator uses only Python standard library modules
+# No external dependencies required
+
+# Python 3.6+ required for:
+# - f-string formatting
+# - pathlib module (Python 3.4+)
+# - datetime module
+# - csv module
+# - random module
+# - os module
+# - time module
+# - signal module
+# - sys module
+
+# All required modules are part of Python standard library:
+# csv
+# random
+# os
+# time
+# signal
+# sys
+# datetime
+# pathlib
+
+# Configuration Options:
+# OUTPUT_DIR - Directory for CSV output files
+# SIMULATION_INTERVAL - Seconds between file generations
+# MIN_ENTRIES - Minimum entries per CSV file
+# MAX_ENTRIES - Maximum entries per CSV file 
