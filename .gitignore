@@ -189,4 +189,11 @@ Thumbs.db
 
 # Crown files (if they contain sensitive data)
 # Uncomment if needed:
-# crown_files/ 
+crown_files/
+processed_files/
+simulator/
+notes.txt
+bobo_mapping.db
+*.csv
+simulator/requirements.txt
+simulator/bobosim.py
