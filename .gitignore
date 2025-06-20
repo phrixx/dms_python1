@@ -197,3 +197,4 @@ bobo_mapping.db
 *.csv
 simulator/requirements.txt
 simulator/bobosim.py
+logs/
