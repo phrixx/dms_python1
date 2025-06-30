@@ -7,16 +7,18 @@ TABLE OF CONTENTS
 1. Overview
 2. Key Features  
 3. System Requirements
-4. Installation
-5. Configuration
-6. Usage
-7. How It Works
-8. Database Structure
-9. Logging
-10. Troubleshooting
-11. Security Considerations
-12. Performance
-13. Support
+4. Project Structure
+5. Installation
+6. Configuration
+7. Usage
+8. How It Works
+9. Database Structure
+10. Logging
+11. Troubleshooting
+12. Security Considerations
+13. Performance
+14. Support
+15. Documentation
 
 ================================================================================
 
@@ -50,7 +52,23 @@ The BOBO processor is a Python-based integration tool that processes BOBO worker
 
 ================================================================================
 
-4. INSTALLATION
+4. PROJECT STRUCTURE
+
+bobosync/
+├── athoc_client.py              # AtHoc API client library
+├── bobo_processor.py            # Main processing engine
+├── requirements.txt             # Python dependencies
+├── .env_safe                   # Configuration template
+├── process.md                  # Detailed process guide (see this for troubleshooting)
+├── windows_scheduler_setup.md  # Windows Task Scheduler setup guide
+├── run_bobo_windows.ps1        # PowerShell wrapper for Windows automation
+├── run_bobo_windows.bat        # Batch wrapper for Windows automation
+├── bobo_mapping.db             # SQLite database (created automatically)
+└── .env                        # Your configuration (create from .env_safe)
+
+================================================================================
+
+5. INSTALLATION
 
 Step 1: Clone or download the project
    Navigate to: dms_python/bobosync
@@ -59,16 +77,41 @@ Step 2: Install dependencies
    Command: pip install -r requirements.txt
 
 Step 3: Configure environment
-   Copy config_template.txt to .env
+   Copy .env_safe to .env
    Edit .env with your specific configuration
+   The .env_safe template includes all necessary settings with documentation
 
 ================================================================================
 
-5. CONFIGURATION
+6. CONFIGURATION
 
-5.1 ENVIRONMENT VARIABLES (.env file)
+6.1 ENVIRONMENT VARIABLES (.env file)
 
-5.1.1 AtHoc Connection Settings
+NOTE: The .env_safe template contains all necessary configuration variables with 
+comprehensive documentation and setup instructions.
+
+The .env_safe file includes organized sections for:
+• AtHoc API Authentication - Server URL, credentials, OAuth2 settings
+• SSL and Security Settings - Certificate verification options
+• Logging Configuration - Log levels, directories, retention
+• File Processing Settings - CSV directories, batch sizes, file management
+• Database Configuration - SQLite database settings
+• User Mapping Sync Settings - Automatic sync scheduling
+• AtHoc Field Mappings - Critical field name mappings (must match your AtHoc instance)
+• Maintenance Settings - Automatic cleanup configurations
+
+6.2 CRITICAL CONFIGURATION NOTES
+
+6.2.1 AtHoc Field Mappings (Most Important)
+DUTY_STATUS_FIELD=On-Duty-DTG     # Must exactly match your AtHoc duty status field name
+COLLAR_ID_FIELD=Collar-Number     # Must match the AtHoc field containing worker IDs
+USER_ATTRIBUTES=Collar-Number,FIRSTNAME,LASTNAME  # Must include all fields needed for mapping
+
+6.2.2 File Processing
+CSV_DIRECTORY=../crown_files      # Path to your BOBO CSV files
+MOVE_PROCESSED_FILES=false        # Set to false for testing, true for production
+
+6.2.3 AtHoc Connection Settings
 ATHOC_SERVER_URL=https://your-athoc-server.com
 CLIENT_ID=your_client_id
 CLIENT_SECRET=your_client_secret
@@ -77,36 +120,37 @@ PASSWORD=your_password
 ORG_CODE=your_org_code
 SCOPE=your_scope
 
-5.1.2 SSL and Security
+6.2.4 SSL and Security
 DISABLE_SSL_VERIFY=false
 
-5.1.3 Data Processing Settings
-CSV_DIRECTORY=../crown_files
+6.2.5 Data Processing Settings
 DB_PATH=bobo_mapping.db
-DUTY_STATUS_FIELD=On-Duty-DTG
-COLLAR_ID_FIELD=Collar-Number
-USER_ATTRIBUTES=Collar-Number,FIRSTNAME,LASTNAME
 BATCH_SIZE=10
 AUTO_CLEANUP_HOURS=24
 
-5.1.4 User Mapping Sync Settings
+6.2.6 User Mapping Sync Settings
 SYNC_MAPPINGS=true
 SYNC_HOUR=20
 SYNC_RETRY_DAYS=2
 
-5.1.5 File Management
+6.2.7 File Management
 PROCESSED_DIRECTORY=./processed_files
-MOVE_PROCESSED_FILES=false
 
-5.1.6 Logging Configuration
+6.2.8 Logging Configuration
 LOG_DIRECTORY=../logs
 LOG_PURGE_DAYS=10
 
+For complete configuration details, see the comprehensive .env_safe template file which includes:
+• Detailed descriptions for every setting
+• Setup instructions and verification checklist
+• Testing vs. production recommendations
+• Field verification requirements
+
 ================================================================================
 
-6. USAGE
+7. USAGE
 
-6.1 Basic Operation
+7.1 Basic Operation
 Navigate to bobosync directory and run: python bobo_processor.py
 
 The processor will:
@@ -116,7 +160,15 @@ The processor will:
 4. Process duty status updates and sync to AtHoc
 5. Log all activities and manage processed files
 
-6.2 Manual User Mapping Sync
+7.2 Windows Automation
+For automated execution on Windows, see the Windows Scheduler Setup Guide 
+(windows_scheduler_setup.md) which includes:
+• Task Scheduler configuration for every minute execution
+• PowerShell and Batch wrapper scripts
+• Process management and error handling
+• Performance optimization tips
+
+7.3 Manual User Mapping Sync
 Use the following Python code:
 
 from bobo_processor import BOBOProcessor
@@ -126,9 +178,9 @@ processor.sync_worker_mappings()
 
 ================================================================================
 
-7. HOW IT WORKS
+8. HOW IT WORKS
 
-7.1 High-Level Process Flow
+8.1 High-Level Process Flow
 
 START
 ↓
@@ -168,7 +220,7 @@ Auto-cleanup Old Duty Status ←
 ↓
 Wait/Poll (back to Monitor)
 
-7.2 Enhanced Batch Processing
+8.2 Enhanced Batch Processing
 
 The system uses intelligent batching for optimal performance and data safety:
 
@@ -185,28 +237,28 @@ Benefits:
 • Consistency: All updates applied atomically
 • Conflict Resolution: Automatic handling of duplicate employee updates
 
-7.3 Data Flow
+8.3 Data Flow
 
-7.3.1 BOBO CSV Input
+8.3.1 BOBO CSV Input
 Worker duty status exported from BOBO system:
 Employee_ID,Status,Timestamp
 12345,On Duty,2024-06-17 14:30:00
 67890,Off Duty,2024-06-17 14:31:00
 
-7.3.2 User Mapping Database
+8.3.2 User Mapping Database
 Local SQLite database mapping employee IDs to AtHoc usernames:
 employee_id | username              | collar_id | last_updated
 12345      | john.doe@company.com  | 12345     | 2024-06-17 20:00:00
 67890      | jane.smith@company.com| 67890     | 2024-06-17 20:00:00
 
-7.3.3 AtHoc User Update
+8.3.3 AtHoc User Update
 Duty status synchronized to AtHoc custom fields:
 {
   "LOGIN_ID": "john.doe@company.com",
   "On-Duty-DTG": "17/06/2024 14:30:00"
 }
 
-7.4 User Mapping Sync Schedule
+8.4 User Mapping Sync Schedule
 
 The system automatically syncs user mappings from AtHoc on the following schedule:
 • Daily: After configured hour (default: 8pm) and not already done today
@@ -216,9 +268,9 @@ The system automatically syncs user mappings from AtHoc on the following schedul
 
 ================================================================================
 
-8. DATABASE STRUCTURE
+9. DATABASE STRUCTURE
 
-8.1 Worker Mappings Table
+9.1 Worker Mappings Table
 CREATE TABLE worker_mapping (
     employee_id TEXT PRIMARY KEY,
     username TEXT NOT NULL,
@@ -226,7 +278,7 @@ CREATE TABLE worker_mapping (
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-8.2 Processing Log Table
+9.2 Processing Log Table
 CREATE TABLE processing_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     filename TEXT NOT NULL,
@@ -237,7 +289,7 @@ CREATE TABLE processing_log (
     errors TEXT
 );
 
-8.3 Sync Tracking Table
+9.3 Sync Tracking Table
 CREATE TABLE sync_tracking (
     sync_type TEXT PRIMARY KEY,
     last_sync_date DATE,
@@ -247,15 +299,15 @@ CREATE TABLE sync_tracking (
 
 ================================================================================
 
-9. LOGGING
+10. LOGGING
 
-9.1 Log Files
+10.1 Log Files
 • Location: Configurable via LOG_DIRECTORY
 • Rotation: Daily at midnight
 • Retention: Configurable via LOG_PURGE_DAYS
 • Format: bobo_processor.log (current), bobo_processor.log.YYYY-MM-DD (historical)
 
-9.2 Log Levels
+10.2 Log Levels
 
 INFO Level:
 • System startup and shutdown
@@ -286,18 +338,21 @@ PRODUCTION RECOMMENDATION: Use INFO level to avoid massive log files from indivi
 
 ================================================================================
 
-10. TROUBLESHOOTING
+11. TROUBLESHOOTING
 
-10.1 Common Issues
+For comprehensive troubleshooting procedures, see the Process Guide (process.md) 
+which includes detailed diagnostic steps, code locations, and emergency procedures.
 
-10.1.1 Connection Problems
+11.1 Quick Reference - Common Issues
+
+11.1.1 Connection Problems
 Check AtHoc connectivity:
 curl -k https://your-athoc-server.com/api/health
 
 Verify SSL settings (for development environments only):
 DISABLE_SSL_VERIFY=true
 
-10.1.2 User Mapping Issues
+11.1.2 User Mapping Issues
 Check user attributes configuration:
 USER_ATTRIBUTES=Collar-Number,FIRSTNAME,LASTNAME
 
@@ -305,7 +360,7 @@ Verify field names in AtHoc match configuration:
 COLLAR_ID_FIELD=Collar-Number
 DUTY_STATUS_FIELD=On-Duty-DTG
 
-10.1.3 File Processing Problems
+11.1.3 File Processing Problems
 Ensure CSV directory exists and is readable:
 ls -la /path/to/csv/directory
 
@@ -315,7 +370,7 @@ chmod 755 /path/to/csv/directory
 Verify files aren't moved prematurely:
 Files should only be in processed directory after successful AtHoc sync
 
-10.1.4 Batch Processing Issues
+11.1.4 Batch Processing Issues
 Check if files are stuck in source directory:
 This indicates AtHoc sync failures - check logs for API errors
 
@@ -325,7 +380,7 @@ BATCH_SIZE=10  (Reduce if getting timeout errors)
 Check for timestamp format issues:
 CSV timestamps must be parseable for conflict resolution
 
-10.2 Debug Mode
+11.2 Debug Mode
 Enable detailed logging by setting environment variable:
 export LOG_LEVEL=DEBUG
 python bobo_processor.py
@@ -333,7 +388,7 @@ python bobo_processor.py
 Or modify code for persistent debug logging:
 logging.getLogger().setLevel(logging.DEBUG)
 
-10.3 Manual Testing
+11.3 Manual Testing
 Test AtHoc connection:
 from athoc_client import AtHocClient
 client = AtHocClient()
@@ -351,7 +406,7 @@ print(f"Found {len(batch_files)} files to process")
 
 ================================================================================
 
-11. SECURITY CONSIDERATIONS
+12. SECURITY CONSIDERATIONS
 
 • Store .env file securely and never commit to version control
 • Use service accounts with minimal required permissions
@@ -364,22 +419,22 @@ print(f"Found {len(batch_files)} files to process")
 
 ================================================================================
 
-12. PERFORMANCE
+13. PERFORMANCE
 
-12.1 Optimization Settings
+13.1 Optimization Settings
 • BATCH_SIZE: Adjust based on AtHoc server capacity (default: 10)
 • SYNC_HOUR: Schedule during low-traffic periods
 • AUTO_CLEANUP_HOURS: Balance between accuracy and performance
 • LOG_LEVEL: Use INFO in production to minimize log file size
 
-12.2 Monitoring
+13.2 Monitoring
 • Monitor log files for batch processing times and success rates
 • Track user mapping sync success rates
 • Monitor AtHoc API response times and error rates
 • Set up alerts for processing failures and file accumulation
 • Batch Efficiency: Monitor API call reduction from batch processing
 
-12.3 Performance Benefits
+13.3 Performance Benefits
 • Reduced API Load: Single batch call vs. multiple individual calls
 • Faster Processing: Memory-based file handling vs. disk I/O per file
 • Network Efficiency: Fewer HTTP requests to AtHoc server
@@ -387,17 +442,27 @@ print(f"Found {len(batch_files)} files to process")
 
 ================================================================================
 
-13. SUPPORT
+14. SUPPORT
 
 For issues and questions:
-1. Check log files for error details (focus on INFO/ERROR levels)
-2. Verify configuration against this documentation
-3. Test individual components manually
-4. Review AtHoc API documentation for field mappings
-5. Batch Issues: Check if files are accumulating in source directory indicating sync failures
+1. First: Check the Process Guide (process.md) for detailed troubleshooting procedures
+2. Check log files for error details (focus on INFO/ERROR levels)
+3. Verify configuration against this documentation
+4. Test individual components manually using the examples in the Process Guide
+5. Review AtHoc API documentation for field mappings
+6. Batch Issues: Check if files are accumulating in source directory indicating sync failures
 
 ================================================================================
 
-DOCUMENT VERSION: 1.0
-LAST UPDATED: 2024-06-18
+15. DOCUMENTATION
+
+• Process Guide (process.md) - Comprehensive troubleshooting and maintenance guide
+• Windows Scheduler Setup (windows_scheduler_setup.md) - Complete guide for Windows Task Scheduler automation
+• Integration Documentation (this file) - Complete technical documentation
+• README.md - Quick start and configuration reference 
+
+================================================================================
+
+DOCUMENT VERSION: 1.1
+LAST UPDATED: 2024-12-20
 SYSTEM: BOBO AtHoc Integration Tool 
