@@ -26,6 +26,19 @@ The BOBO processor monitors CSV files containing worker duty status information 
 - Read access to BOBO CSV output files
 - Write access for database and log files
 
+## Project Structure
+
+```
+bobosync/
+├── athoc_client.py          # AtHoc API client library
+├── bobo_processor.py        # Main processing engine
+├── requirements.txt         # Python dependencies
+├── .env_safe               # Configuration template
+├── process.md              # Detailed process guide (see this for troubleshooting)
+├── bobo_mapping.db         # SQLite database (created automatically)
+└── .env                    # Your configuration (create from .env_safe)
+```
+
 ## Installation
 
 1. **Clone or download the project**
@@ -41,17 +54,21 @@ pip install -r requirements.txt
 
 3. **Configure environment**
 ```bash
-cp config_template.txt .env
-# Edit .env with your specific configuration
+cp .env_safe .env
+# Edit .env with your specific configuration values
+# Note: You'll need to add additional variables as documented below
 ```
 
 ## Configuration
 
 ### Environment Variables (.env file)
 
-#### **AtHoc Connection Settings**
+**Note:** The `.env_safe` template contains only the core AtHoc connection variables. You'll need to add the additional configuration variables listed below based on your specific requirements.
+
+#### **Core Configuration (included in .env_safe template)**
+
 ```bash
-# AtHoc server and authentication
+# AtHoc server and authentication (REQUIRED)
 ATHOC_SERVER_URL=https://your-athoc-server.com
 CLIENT_ID=your_client_id
 CLIENT_SECRET=your_client_secret
@@ -59,13 +76,15 @@ USERNAME=your_username
 PASSWORD=your_password
 ORG_CODE=your_org_code
 SCOPE=your_scope
+
+# SSL certificate verification (set to true for development only)
+DISABLE_SSL_VERIFY=false
+
+# Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+LOG_LEVEL=INFO
 ```
 
-#### **SSL and Security**
-```bash
-# SSL certificate verification (set to true for development servers)
-DISABLE_SSL_VERIFY=false
-```
+#### **Additional Configuration (add to your .env file as needed)**
 
 #### **Data Processing Settings**
 ```bash
@@ -218,6 +237,16 @@ Benefits:
    }
    ```
 
+## Detailed Process Guide
+
+For comprehensive troubleshooting, detailed process flow analysis, and maintenance procedures, see the **[Process Guide](process.md)**. This guide includes:
+
+- **Step-by-step process flow** with specific code locations
+- **Detailed troubleshooting procedures** for common issues
+- **Monitoring checklists** for daily, weekly, and monthly maintenance
+- **Emergency procedures** for system failures
+- **Performance optimization** guidance
+
 ### User Mapping Sync Schedule
 
 The system automatically syncs user mappings from AtHoc on the following schedule:
@@ -297,7 +326,9 @@ CREATE TABLE sync_tracking (
 
 ## Troubleshooting
 
-### Common Issues
+**For comprehensive troubleshooting procedures, see the [Process Guide](process.md) which includes detailed diagnostic steps, code locations, and emergency procedures.**
+
+### Quick Reference - Common Issues
 
 #### Connection Problems
 ```bash
@@ -406,8 +437,15 @@ print(f"Found {len(batch_files)} files to process")
 ## Support
 
 For issues and questions:
-1. Check log files for error details (focus on INFO/ERROR levels)
-2. Verify configuration against this documentation
-3. Test individual components manually
-4. Review AtHoc API documentation for field mappings
-5. **Batch Issues**: Check if files are accumulating in source directory indicating sync failures 
+1. **First**: Check the **[Process Guide](process.md)** for detailed troubleshooting procedures
+2. Check log files for error details (focus on INFO/ERROR levels)
+3. Verify configuration against this documentation
+4. Test individual components manually using the examples in the Process Guide
+5. Review AtHoc API documentation for field mappings
+6. **Batch Issues**: Check if files are accumulating in source directory indicating sync failures
+
+## Documentation
+
+- **[Process Guide](process.md)** - Comprehensive troubleshooting and maintenance guide
+- **[Integration Documentation](../BOBO_AtHoc_Integration_Documentation.txt)** - Complete technical documentation
+- **This README** - Quick start and configuration reference 
