@@ -169,6 +169,7 @@ simulator/output/
 # Environment files
 .env*
 !.env.example
+!.env_safe
 
 # Log files
 *.log

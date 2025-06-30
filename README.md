@@ -30,13 +30,16 @@ The BOBO processor monitors CSV files containing worker duty status information 
 
 ```
 bobosync/
-├── athoc_client.py          # AtHoc API client library
-├── bobo_processor.py        # Main processing engine
-├── requirements.txt         # Python dependencies
-├── .env_safe               # Configuration template
-├── process.md              # Detailed process guide (see this for troubleshooting)
-├── bobo_mapping.db         # SQLite database (created automatically)
-└── .env                    # Your configuration (create from .env_safe)
+├── athoc_client.py              # AtHoc API client library
+├── bobo_processor.py            # Main processing engine
+├── requirements.txt             # Python dependencies
+├── .env_safe                   # Configuration template
+├── process.md                  # Detailed process guide (see this for troubleshooting)
+├── windows_scheduler_setup.md  # Windows Task Scheduler setup guide
+├── run_bobo_windows.ps1        # PowerShell wrapper for Windows automation
+├── run_bobo_windows.bat        # Batch wrapper for Windows automation
+├── bobo_mapping.db             # SQLite database (created automatically)
+└── .env                        # Your configuration (create from .env_safe)
 ```
 
 ## Installation
@@ -56,85 +59,43 @@ pip install -r requirements.txt
 ```bash
 cp .env_safe .env
 # Edit .env with your specific configuration values
-# Note: You'll need to add additional variables as documented below
+# The .env_safe template now includes all necessary settings with documentation
 ```
 
 ## Configuration
 
 ### Environment Variables (.env file)
 
-**Note:** The `.env_safe` template contains only the core AtHoc connection variables. You'll need to add the additional configuration variables listed below based on your specific requirements.
+**Note:** The `.env_safe` template now contains all necessary configuration variables with comprehensive documentation and setup instructions.
 
-#### **Core Configuration (included in .env_safe template)**
+#### **Complete Configuration Template (all included in .env_safe)**
 
-```bash
-# AtHoc server and authentication (REQUIRED)
-ATHOC_SERVER_URL=https://your-athoc-server.com
-CLIENT_ID=your_client_id
-CLIENT_SECRET=your_client_secret
-USERNAME=your_username
-PASSWORD=your_password
-ORG_CODE=your_org_code
-SCOPE=your_scope
+The `.env_safe` file includes organized sections for:
+- **AtHoc API Authentication** - Server URL, credentials, OAuth2 settings
+- **SSL and Security Settings** - Certificate verification options
+- **Logging Configuration** - Log levels, directories, retention
+- **File Processing Settings** - CSV directories, batch sizes, file management
+- **Database Configuration** - SQLite database settings
+- **User Mapping Sync Settings** - Automatic sync scheduling
+- **AtHoc Field Mappings** - Critical field name mappings (must match your AtHoc instance)
+- **Maintenance Settings** - Automatic cleanup configurations
 
-# SSL certificate verification (set to true for development only)
-DISABLE_SSL_VERIFY=false
+#### **Critical Configuration Notes**
 
-# Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-LOG_LEVEL=INFO
-```
+**AtHoc Field Mappings (Most Important):**
+- `DUTY_STATUS_FIELD` - Must exactly match your AtHoc duty status field name
+- `COLLAR_ID_FIELD` - Must match the AtHoc field containing worker IDs
+- `USER_ATTRIBUTES` - Must include all fields needed for mapping
 
-#### **Additional Configuration (add to your .env file as needed)**
+**File Processing:**
+- `CSV_DIRECTORY` - Path to your BOBO CSV files
+- `MOVE_PROCESSED_FILES` - Set to `false` for testing, `true` for production
 
-#### **Data Processing Settings**
-```bash
-# Directory containing BOBO CSV files
-CSV_DIRECTORY=../crown_files
-
-# Database file for user mappings
-DB_PATH=bobo_mapping.db
-
-# AtHoc field mapping
-DUTY_STATUS_FIELD=On-Duty-DTG
-COLLAR_ID_FIELD=Collar-Number
-
-# User attributes to sync (comma-separated)
-USER_ATTRIBUTES=Collar-Number,FIRSTNAME,LASTNAME
-
-# Processing batch size and cleanup
-BATCH_SIZE=10
-AUTO_CLEANUP_HOURS=24
-```
-
-#### **User Mapping Sync Settings**
-```bash
-# Enable automatic user mapping sync
-SYNC_MAPPINGS=true
-
-# Hour of day (0-23) to run daily sync
-SYNC_HOUR=20
-
-# Force sync if more than this many days since last successful sync
-SYNC_RETRY_DAYS=2
-```
-
-#### **File Management**
-```bash
-# Directory to move processed files (auto-created)
-PROCESSED_DIRECTORY=./processed_files
-
-# Whether to move files after processing
-MOVE_PROCESSED_FILES=false
-```
-
-#### **Logging Configuration**
-```bash
-# Log file directory (auto-created)
-LOG_DIRECTORY=../logs
-
-# Delete log files older than this many days
-LOG_PURGE_DAYS=10
-```
+**For complete configuration details, see the comprehensive `.env_safe` template file which includes:**
+- Detailed descriptions for every setting
+- Setup instructions and verification checklist
+- Testing vs. production recommendations
+- Field verification requirements
 
 ## Usage
 
@@ -150,6 +111,13 @@ The processor will:
 3. Monitor for new CSV files in the configured directory
 4. Process duty status updates and sync to AtHoc
 5. Log all activities and manage processed files
+
+### Windows Automation
+For automated execution on Windows, see the **[Windows Scheduler Setup Guide](windows_scheduler_setup.md)** which includes:
+- Task Scheduler configuration for every minute execution
+- PowerShell and Batch wrapper scripts
+- Process management and error handling
+- Performance optimization tips
 
 ### Manual User Mapping Sync
 ```python
@@ -447,5 +415,6 @@ For issues and questions:
 ## Documentation
 
 - **[Process Guide](process.md)** - Comprehensive troubleshooting and maintenance guide
+- **[Windows Scheduler Setup](windows_scheduler_setup.md)** - Complete guide for Windows Task Scheduler automation
 - **[Integration Documentation](../BOBO_AtHoc_Integration_Documentation.txt)** - Complete technical documentation
 - **This README** - Quick start and configuration reference 
