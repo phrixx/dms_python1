@@ -93,6 +93,19 @@ class AtHocClient:
         adapter = TLS12HttpAdapter()
         session.mount('https://', adapter)
         
+        # Add proxy support
+        http_proxy = os.getenv("HTTP_PROXY")
+        https_proxy = os.getenv("HTTPS_PROXY")
+        
+        if http_proxy or https_proxy:
+            proxies = {}
+            if http_proxy:
+                proxies['http'] = http_proxy
+            if https_proxy:
+                proxies['https'] = https_proxy
+            session.proxies.update(proxies)
+            print(f"Using proxy configuration: {proxies}")
+        
         if os.getenv("DISABLE_SSL_VERIFY", "false").lower() == "true":
             session.verify = False
             import urllib3
