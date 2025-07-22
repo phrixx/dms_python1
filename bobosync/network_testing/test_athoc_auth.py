@@ -25,7 +25,7 @@ def main():
     base_url = os.getenv("ATHOC_SERVER_URL")
     client_id = os.getenv("CLIENT_ID")
     client_secret = os.getenv("CLIENT_SECRET")
-    username = os.getenv("USERNAME")
+    username = os.getenv("APIUSER")
     password = os.getenv("PASSWORD")
     org_code = os.getenv("ORG_CODE")
     scope = os.getenv("SCOPE", "athoc.iws.web.api")

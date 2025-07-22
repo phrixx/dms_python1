@@ -123,7 +123,7 @@ class AtHocClient:
             "ATHOC_SERVER_URL": os.getenv("ATHOC_SERVER_URL"),
             "CLIENT_ID": os.getenv("CLIENT_ID"),
             "CLIENT_SECRET": os.getenv("CLIENT_SECRET"),
-            "USERNAME": os.getenv("USERNAME"),
+            "USERNAME": os.getenv("APIUSER"),
             "PASSWORD": os.getenv("PASSWORD"),
             "ORG_CODE": os.getenv("ORG_CODE")
         }
