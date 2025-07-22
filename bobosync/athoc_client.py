@@ -463,7 +463,8 @@ class AtHocClient:
                 except:
                     print(f"ERROR response text: {e.response.text}")
             raise
-    
+
+# todo: this code should not be in the file, it should be in the bobo_processor.py file
     def update_user_duty_status(self, username: str, duty_datetime: str = None, 
                               duty_status_field: str = "DUTY_STATUS") -> bool:
         """Update a single user's duty status using the sync API
@@ -501,6 +502,7 @@ class AtHocClient:
             print(f"Exception updating duty status for {username}: {str(e)}")
             return False
     
+# todo: this code should not be in the file, it should be in the bobo_processor.py file
     def batch_update_duty_status(self, duty_updates: List[Dict], 
                                duty_status_field: str = "DUTY_STATUS") -> Dict[str, bool]:
         """Batch update multiple users' duty status
@@ -548,6 +550,8 @@ class AtHocClient:
             # Return all failed
             return {update.get("username"): False for update in duty_updates if update.get("username")}
 
+
+# todo: this code should not be in the file, it should be in the bobo_processor.py file
     def query_users_with_old_duty_status(self, duty_status_field: str = "DUTY_STATUS", 
                                        hours_threshold: int = 24) -> List[str]:
         """Query users with duty status older than threshold (for auto-cleanup)
@@ -591,7 +595,9 @@ class AtHocClient:
         except Exception as e:
             print(f"WARNING: Error querying users with old duty status: {str(e)}")
             return []
+        
 
+# todo: this code should not be in the file, it should be in the bobo_processor.py file 
     def clear_old_duty_status(self, duty_status_field: str = "DUTY_STATUS", 
                             hours_threshold: int = 24) -> int:
         """Clear duty status for users with timestamps older than threshold

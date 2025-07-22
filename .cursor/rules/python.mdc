@@ -1,0 +1,65 @@
+---
+alwaysApply: false
+---
+---
+globs: ["**/*.py"]
+---
+
+# Python Best Practices
+
+This file establishes the core style and conventions for our Python project. The AI should adhere to these rules when generating or modifying code.
+
+---
+
+## **General Conventions**
+
+- **Clarity and Simplicity**: Code should be easy to read and understand. Prioritize straightforward logic over complex one-liners.
+- **PEP 8**: All code must follow the PEP 8 style guide. This includes using 4 spaces for indentation, snake_case for variable and function names, and appropriate line lengths.
+- **Imports**: All imports should be at the top of the file, organized into three groups:
+    1. Standard library imports (e.g., `os`, `sys`)
+    2. Third-party library imports (e.g., `requests`, `numpy`)
+    3. Local application/library imports
+
+```python
+# Good import style
+import os
+import sys
+
+import requests
+from flask import Flask
+
+from . import models
+
+# Good function with type hints
+def get_user(user_id: int) -> dict[str, any]:
+    """Fetches a user from the database."""
+    # function logic here...
+    return {'user_id': user_id, 'name': 'John Doe'}
+
+# Good Google-style docstring
+def example_function(arg1: int, arg2: str) -> bool:
+    """This is a short description of the function.
+
+    This section provides a more detailed explanation of what the function
+    does, its purpose, and any relevant context.
+
+    Args:
+        arg1 (int): A description of the first argument.
+        arg2 (str): A description of the second argument.
+
+    Returns:
+        bool: A description of the return value.
+    """
+    return True
+
+
+import logging
+
+# Good logging example
+try:
+    # some operation
+    logging.info("Operation successful.")
+except FileNotFoundError as e:
+    logging.error(f"Failed to open file: {e}")
+except Exception:
+    logging.critical("An unexpected error occurred.", exc_info=True)
