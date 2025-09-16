@@ -199,3 +199,4 @@ bobo_mapping.db
 simulator/requirements.txt
 simulator/bobosim.py
 logs/
+simulator/README.md

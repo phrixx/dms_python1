@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from logging.handlers import TimedRotatingFileHandler
 from dataclasses import dataclass
+from typing_extensions import Self
 
 # Load environment variables from .env file
 try:
@@ -240,6 +241,20 @@ class BOBOProcessor:
         self.log_directory = self.config['log_directory']
         self.log_purge_days = self.config['log_purge_days']
     
+    def _normalize_path(self, path: str) -> str:
+        """Normalize UNC and mixed-separator paths (Windows-safe).
+        Accepts both //server/share and \\server\share inputs and normalizes separators.
+        """
+        try:
+            if isinstance(path, str):
+                # Convert //server/share to \\server\share on Windows
+                if os.name == 'nt' and path.startswith('//'):
+                    path = '\\\\' + path.lstrip('/').replace('/', '\\')
+                return os.path.normpath(path)
+            return path
+        except Exception:
+            return path
+
     @staticmethod
     def format_datetime_for_athoc(dt: datetime) -> str:
         """Format datetime in the format required by AtHoc: dd/MM/yyyy HH:mm:ss"""
@@ -462,11 +477,21 @@ class BOBOProcessor:
     
     def get_csv_files(self, directory: str) -> List[str]:
         """Get all CSV files in directory, sorted by modification time (oldest first)"""
+        # Normalize directory (handles //UNC and mixed separators on Windows)
+        directory = self._normalize_path(directory)
         csv_pattern = os.path.join(directory, "*.csv")
-        csv_files = glob.glob(csv_pattern)
+        csv_pattern = self._normalize_path(csv_pattern)
+        self.logger.info(f"Searching for CSV files in {directory}")
+        csv_files = [self._normalize_path(p) for p in glob.glob(csv_pattern)]
         
         # Sort by modification time (oldest first)
-        csv_files.sort(key=lambda x: os.path.getmtime(x))
+        def _safe_mtime(p: str) -> float:
+            try:
+                return os.path.getmtime(p)
+            except Exception as e:
+                self.logger.warning(f"Skipping file due to mtime error: {p} -> {e}")
+                return float('inf')
+        csv_files.sort(key=_safe_mtime)
         
         self.logger.info(f"Found {len(csv_files)} CSV files in {directory}")
         return csv_files
@@ -485,10 +510,13 @@ class BOBOProcessor:
             return True
             
         try:
+            # Normalize source path
+            filepath = self._normalize_path(filepath)
             # Get processed directory path (convert relative to absolute if needed)
             processed_dir = self.config['processed_directory']
             if not os.path.isabs(processed_dir):
                 processed_dir = os.path.join(os.path.dirname(__file__), processed_dir)
+            processed_dir = self._normalize_path(processed_dir)
             
             # Create processed directory if it doesn't exist
             os.makedirs(processed_dir, exist_ok=True)
@@ -496,6 +524,7 @@ class BOBOProcessor:
             # Get filename and construct destination path
             filename = os.path.basename(filepath)
             destination = os.path.join(processed_dir, filename)
+            destination = self._normalize_path(destination)
             
             # Handle filename conflicts by adding timestamp suffix
             if os.path.exists(destination):
@@ -503,6 +532,7 @@ class BOBOProcessor:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"{name}_{timestamp}{ext}"
                 destination = os.path.join(processed_dir, filename)
+                destination = self._normalize_path(destination)
             
             # Move the file
             shutil.move(filepath, destination)
@@ -518,6 +548,7 @@ class BOBOProcessor:
         entries = []
         
         try:
+            filepath = self._normalize_path(filepath)
             with open(filepath, 'r', newline='', encoding='utf-8') as csvfile:
                 reader = csv.reader(csvfile)
                 
