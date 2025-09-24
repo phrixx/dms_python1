@@ -14,8 +14,25 @@ The BOBO Sync system processes worker duty status CSV files from the BOBO system
 ## Detailed Process Flow
 
 ### 1. Initialization Phase
-```
-START → Load Configuration → Validate Environment → Connect to AtHoc
+
+```plantuml
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor #E8F5E8
+  BorderColor #4CAF50
+  FontColor #000000
+}
+
+start
+:Load Configuration;
+:Validate Environment;
+:Connect to AtHoc;
+:Initialize Database;
+stop
+
+@enduml
 ```
 
 **What Happens:**
@@ -31,8 +48,29 @@ START → Load Configuration → Validate Environment → Connect to AtHoc
 - `BOBODatabase.init_database()` - Database setup
 
 ### 2. User Mapping Sync Phase
-```
-Check Sync Schedule → Sync Needed? → Fetch AtHoc Users → Update Local Database
+
+```plantuml
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor #FFF3E0
+  BorderColor #FF9800
+  FontColor #000000
+}
+
+start
+:Check Sync Schedule;
+if (Sync Needed?) then (yes)
+  :Fetch AtHoc Users;
+  :Update Local Database;
+  :Record Sync Completion;
+else (no)
+  :Skip Sync;
+endif
+stop
+
+@enduml
 ```
 
 **What Happens:**
@@ -47,8 +85,30 @@ Check Sync Schedule → Sync Needed? → Fetch AtHoc Users → Update Local Data
 - `BOBODatabase.update_mapping()` - Local database update
 
 ### 3. File Monitoring Phase
-```
-Monitor CSV Directory → New Files? → Collect Batch → Parse Files
+
+```plantuml
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor #E3F2FD
+  BorderColor #2196F3
+  FontColor #000000
+}
+
+start
+:Monitor CSV Directory;
+if (New Files?) then (yes)
+  :Collect Batch;
+  :Parse Files;
+  :Validate Data;
+else (no)
+  :Wait/Poll;
+  stop
+endif
+stop
+
+@enduml
 ```
 
 **What Happens:**
@@ -63,8 +123,25 @@ Monitor CSV Directory → New Files? → Collect Batch → Parse Files
 - `BOBOEntry.from_csv_row()` - Data validation
 
 ### 4. Data Processing Phase
-```
-Combine Records → Resolve Conflicts → Map Employee IDs → Prepare Updates
+
+```plantuml
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor #F3E5F5
+  BorderColor #9C27B0
+  FontColor #000000
+}
+
+start
+:Combine Records;
+:Resolve Conflicts;
+:Map Employee IDs;
+:Prepare Updates;
+stop
+
+@enduml
 ```
 
 **What Happens:**
@@ -79,8 +156,29 @@ Combine Records → Resolve Conflicts → Map Employee IDs → Prepare Updates
 - Conflict resolution logic (latest timestamp wins)
 
 ### 5. AtHoc Synchronization Phase
-```
-Batch Update AtHoc → Verify Success → Move Files → Log Results
+
+```plantuml
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor #FFEBEE
+  BorderColor #F44336
+  FontColor #000000
+}
+
+start
+:Batch Update AtHoc;
+if (Verify Success?) then (yes)
+  :Move Files;
+  :Log Results;
+else (no)
+  :Keep Files for Retry;
+  :Log Error;
+endif
+stop
+
+@enduml
 ```
 
 **What Happens:**
@@ -95,8 +193,24 @@ Batch Update AtHoc → Verify Success → Move Files → Log Results
 - `BOBODatabase.log_processing()` - Result logging
 
 ### 6. Auto-Cleanup Phase
-```
-Auto Cleanup → Purge Old Logs → Return to Monitoring
+
+```plantuml
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor #E0F2F1
+  BorderColor #4CAF50
+  FontColor #000000
+}
+
+start
+:Auto Cleanup;
+:Purge Old Logs;
+:Return to Monitoring;
+stop
+
+@enduml
 ```
 
 **What Happens:**
@@ -123,10 +237,39 @@ Auto Cleanup → Purge Old Logs → Return to Monitoring
 
 ## Data Flow Diagram
 
-```
-CSV Files → Parse → Local DB Lookup → AtHoc Update → File Movement → Auto-Cleanup
-    ↓           ↓           ↓              ↓              ↓              ↓
-[crown_files] [Memory] [bobo_mapping.db] [AtHoc API] [processed_files] [Old Status Clear]
+```plantuml
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor #E1F5FE
+  BorderColor #0277BD
+  FontColor #000000
+}
+skinparam activityDiamond {
+  BackgroundColor #FFF3E0
+  BorderColor #F57C00
+}
+
+start
+:CSV Files in Directory;
+:Parse CSV Files;
+:Store in Memory;
+:Local DB Lookup;
+:Map Employee IDs to Usernames;
+:Prepare Batch Updates;
+:AtHoc API Update;
+if (Update Successful?) then (yes)
+  :Move Files to Processed;
+  :Log Success;
+else (no)
+  :Keep Files for Retry;
+  :Log Error;
+endif
+:Auto-Cleanup Old Status;
+:Return to Monitoring;
+
+@enduml
 ```
 
 ## Key Configuration Points

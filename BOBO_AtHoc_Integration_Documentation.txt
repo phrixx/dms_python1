@@ -246,9 +246,9 @@ Benefits:
 
 8.3.1 BOBO CSV Input
 Worker duty status exported from BOBO system:
-Employee_ID,Status,Timestamp
-12345,On Duty,2024-06-17 14:30:00
-67890,Off Duty,2024-06-17 14:31:00
+Transaction_Type,Employee_ID,Payroll_ID,Clocking_Date,Clocking_Time,DateTime_Created,Geo_Status,Geo_Latitude,Geo_Longitude,Geo_Accuracy
+BON,12345,PAY001,20240617,143000,20240617143000,1,40.7128,-74.0060,5.0
+BOF,67890,PAY002,20240617,143100,20240617143100,1,40.7128,-74.0060,5.0
 
 8.3.2 User Mapping Database
 Local SQLite database mapping employee IDs to AtHoc usernames:

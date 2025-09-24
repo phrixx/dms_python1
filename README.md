@@ -134,37 +134,60 @@ processor.sync_worker_mappings()
 
 ### High-Level Process Flow
 
-```mermaid
-flowchart TD
-    A[Start BOBO Processor] --> B[Load Configuration]
-    B --> C[Connect to AtHoc]
-    C --> D[Check User Mapping Sync Schedule]
-    
-    D --> E{Sync Needed?}
-    E -->|Yes| F[Sync User Mappings from AtHoc]
-    E -->|No| G[Monitor CSV Directory]
-    F --> G
-    
-    G --> H{New CSV Files?}
-    H -->|No| S[Auto-cleanup Old Duty Status]
-    H -->|Yes| J[Collect Files into Batch]
-    
-    J --> K[Parse All CSV Files]
-    K --> L[Combine Records & Resolve Conflicts]
-    L --> M[Map Employee IDs to Usernames]
-    M --> N[Single Batch Update to AtHoc]
-    N --> O{Update Successful?}
-    
-    O -->|Yes| P[Move All Files to Processed]
-    O -->|No| Q[Keep Files for Retry]
-    P --> R[Log Batch Results]
-    Q --> R
-    
-    R --> S[Auto-cleanup Old Duty Status]
-    S --> T[Log Final Summary]
-    T --> I[Wait/Poll]
-    
-    I --> H
+```plantuml
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor #E8F4FD
+  BorderColor #2E86AB
+  FontColor #2E86AB
+}
+skinparam activityDiamond {
+  BackgroundColor #FFE5B4
+  BorderColor #FF8C00
+  FontColor #FF8C00
+}
+
+start
+:Start BOBO Processor;
+:Load Configuration;
+:Connect to AtHoc;
+:Check User Mapping Sync Schedule;
+
+if (Sync Needed?) then (Yes)
+  :Sync User Mappings from AtHoc;
+else (No)
+endif
+
+:Monitor CSV Directory;
+
+if (New CSV Files?) then (No)
+  :Auto-cleanup Old Duty Status;
+  :Log Final Summary;
+  :Wait/Poll;
+  stop
+else (Yes)
+  :Collect Files into Batch;
+  :Parse All CSV Files;
+  :Combine Records & Resolve Conflicts;
+  :Map Employee IDs to Usernames;
+  :Single Batch Update to AtHoc;
+  
+  if (Update Successful?) then (Yes)
+    :Move All Files to Processed;
+  else (No)
+    :Keep Files for Retry;
+  endif
+  
+  :Log Batch Results;
+  :Auto-cleanup Old Duty Status;
+  :Log Final Summary;
+  :Wait/Poll;
+  stop
+endif
+
+@enduml
 ```
 
 ### Enhanced Batch Processing
@@ -189,9 +212,9 @@ Benefits:
 
 1. **BOBO CSV Input**: Worker duty status exported from BOBO system
    ```csv
-   Employee_ID,Status,Timestamp
-   12345,On Duty,2024-06-17 14:30:00
-   67890,Off Duty,2024-06-17 14:31:00
+   Transaction_Type,Employee_ID,Payroll_ID,Clocking_Date,Clocking_Time,DateTime_Created,Geo_Status,Geo_Latitude,Geo_Longitude,Geo_Accuracy
+   BON,12345,PAY001,20240617,143000,20240617143000,1,40.7128,-74.0060,5.0
+   BOF,67890,PAY002,20240617,143100,20240617143100,1,40.7128,-74.0060,5.0
    ```
 
 2. **User Mapping Database**: Local SQLite database mapping employee IDs to AtHoc usernames
