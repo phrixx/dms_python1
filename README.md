@@ -146,7 +146,7 @@ flowchart TD
     F --> G
     
     G --> H{New CSV Files?}
-    H -->|No| I[Wait/Poll]
+    H -->|No| S[Auto-cleanup Old Duty Status]
     H -->|Yes| J[Collect Files into Batch]
     
     J --> K[Parse All CSV Files]
@@ -162,7 +162,7 @@ flowchart TD
     
     R --> S[Auto-cleanup Old Duty Status]
     S --> T[Log Final Summary]
-    T --> I
+    T --> I[Wait/Poll]
     
     I --> H
 ```
