@@ -824,6 +824,8 @@ class BOBOProcessor:
         csv_files = self.get_csv_files(directory)
         if not csv_files:
             self.logger.info("No CSV files found to process")
+            # Still run auto-cleanup even if no CSV files
+            self.auto_cleanup_old_duty_status(duty_status_field)
             return
         
         # Process files in batches
@@ -853,7 +855,7 @@ class BOBOProcessor:
             else:
                 self.logger.error(f"Batch {batch_num} failed - files retained for retry")
         
-        # Auto-cleanup old duty status
+        # Auto-cleanup old duty status (when CSV files were processed)
         self.auto_cleanup_old_duty_status(duty_status_field)
         
         # Final summary
@@ -864,6 +866,7 @@ class BOBOProcessor:
     def auto_cleanup_old_duty_status(self, duty_status_field: str = "DUTY_STATUS"):
         """Auto-cleanup users with old duty status timestamps"""
         try:
+            # Ensure auto-cleanup runs even if no CSV files were processed
             cleared_count = self.athoc_client.clear_old_duty_status(
                 duty_status_field, self.auto_cleanup_hours
             )
@@ -875,7 +878,6 @@ class BOBOProcessor:
                 
         except Exception as e:
             self.logger.error(f"Auto-cleanup failed: {e}")
-
 def main():
     """Main entry point - all configuration from .env file"""
     try:
