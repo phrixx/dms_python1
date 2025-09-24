@@ -94,26 +94,39 @@ Batch Update AtHoc → Verify Success → Move Files → Log Results
 - `BOBOProcessor.move_processed_file()` - File management
 - `BOBODatabase.log_processing()` - Result logging
 
-### 6. Cleanup Phase
+### 6. Auto-Cleanup Phase
 ```
 Auto Cleanup → Purge Old Logs → Return to Monitoring
 ```
 
 **What Happens:**
-- Automatically clears old duty status records from AtHoc
+- **Always runs** regardless of whether CSV files are found
+- Automatically clears old duty status records from AtHoc (configurable threshold)
 - Purges old log files based on retention settings
 - Returns to file monitoring phase
 
 **Key Components:**
 - `AtHocClient.clear_old_duty_status()` - AtHoc cleanup
+- `AtHocClient.query_users_with_old_duty_status()` - Find old entries
+- `AtHocClient.batch_update_duty_status()` - Clear old entries
 - `BOBOProcessor._purge_old_logs()` - Log cleanup
+
+**Configuration:**
+- `AUTO_CLEANUP_HOURS`: Hours after which duty status is considered old (default: 24)
+- `DUTY_STATUS_FIELD`: Field name to clear (must match AtHoc configuration)
+
+**Benefits:**
+- Prevents stale duty status data from accumulating
+- Maintains data accuracy in AtHoc
+- Reduces manual maintenance requirements
+- Ensures only current duty status is displayed
 
 ## Data Flow Diagram
 
 ```
-CSV Files → Parse → Local DB Lookup → AtHoc Update → File Movement
-    ↓           ↓           ↓              ↓              ↓
-[crown_files] [Memory] [bobo_mapping.db] [AtHoc API] [processed_files]
+CSV Files → Parse → Local DB Lookup → AtHoc Update → File Movement → Auto-Cleanup
+    ↓           ↓           ↓              ↓              ↓              ↓
+[crown_files] [Memory] [bobo_mapping.db] [AtHoc API] [processed_files] [Old Status Clear]
 ```
 
 ## Key Configuration Points
@@ -123,6 +136,7 @@ CSV Files → Parse → Local DB Lookup → AtHoc Update → File Movement
 - **Data Processing**: CSV_DIRECTORY, DUTY_STATUS_FIELD, BATCH_SIZE
 - **User Mapping**: USER_ATTRIBUTES, SYNC_HOUR, SYNC_RETRY_DAYS
 - **File Management**: PROCESSED_DIRECTORY, MOVE_PROCESSED_FILES
+- **Auto-Cleanup**: AUTO_CLEANUP_HOURS, DUTY_STATUS_FIELD
 - **Security**: DISABLE_SSL_VERIFY, SCOPE
 
 ### Database Tables
@@ -317,6 +331,49 @@ CSV Files → Parse → Local DB Lookup → AtHoc Update → File Movement
 3. Check proxy settings if applicable
 4. Verify firewall rules allow outbound HTTPS
 
+### Auto-Cleanup Issues
+
+**Symptoms:**
+- Old duty status entries not being cleared
+- "Auto-cleanup" not running in logs
+- Duty status data accumulating over time
+
+**Areas to Check:**
+1. **Configuration**:
+   - Verify `AUTO_CLEANUP_HOURS` is set (default: 24)
+   - Check `DUTY_STATUS_FIELD` matches AtHoc field name
+   - Ensure cleanup runs regardless of CSV file presence
+
+2. **AtHoc Permissions**:
+   - Verify user has permission to update duty status fields
+   - Check if duty status field exists and is writable
+   - Test manual duty status updates
+
+3. **Logging**:
+   - Look for "Auto-cleanup" entries in logs
+   - Check for cleanup success/failure messages
+   - Monitor cleanup operation timing
+
+**Code Locations:**
+- ```601:630:bobosync/athoc_client.py``` - Auto-cleanup logic
+- ```555:598:bobosync/athoc_client.py``` - Query old duty status
+- ```506:552:bobosync/athoc_client.py``` - Batch update duty status
+
+**Manual Testing:**
+```python
+# Test auto-cleanup functionality
+from athoc_client import AtHocClient
+client = AtHocClient()
+
+# Query users with old duty status
+old_users = client.query_users_with_old_duty_status("DUTY_STATUS", 24)
+print(f"Found {len(old_users)} users with old duty status")
+
+# Test cleanup
+cleared_count = client.clear_old_duty_status("DUTY_STATUS", 24)
+print(f"Cleared duty status for {cleared_count} users")
+```
+
 ## Monitoring Checklist
 
 ### Daily Checks:
@@ -324,12 +381,16 @@ CSV Files → Parse → Local DB Lookup → AtHoc Update → File Movement
 - [ ] CSV files being processed without errors
 - [ ] No authentication failures
 - [ ] Log files within normal size limits
+- [ ] Auto-cleanup operations completed successfully
+- [ ] No accumulation of old duty status entries
 
 ### Weekly Checks:
 - [ ] Database size reasonable
 - [ ] Processed files directory manageable
 - [ ] No accumulation of unprocessed files
 - [ ] System performance acceptable
+- [ ] Auto-cleanup effectiveness (check duty status age distribution)
+- [ ] No stale duty status data in AtHoc
 
 ### Monthly Checks:
 - [ ] Review error patterns in logs
@@ -359,5 +420,12 @@ CSV Files → Parse → Local DB Lookup → AtHoc Update → File Movement
 3. Process files manually if needed
 4. Monitor batch sizes
 5. Consider temporary rate limiting
+
+### Auto-Cleanup Failure:
+1. Check AtHoc connectivity and permissions
+2. Verify `AUTO_CLEANUP_HOURS` configuration
+3. Test manual cleanup using provided code examples
+4. Check for duty status field configuration issues
+5. Monitor cleanup operation logs for specific errors
 
 This guide should be referenced whenever issues arise with the BOBO Sync system and updated as new issues or solutions are discovered. 
