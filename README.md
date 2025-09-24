@@ -18,6 +18,7 @@ The BOBO processor monitors CSV files containing worker duty status information 
 - **⚡ Batch Processing**: Efficient bulk updates to AtHoc using native APIs
 - **🔒 Safe Updates**: Only modifies duty status fields, never changes user enable/disable status
 - **🚫 Conflict Resolution**: Latest timestamp wins when multiple updates exist for same employee
+- **🧹 Auto-Cleanup**: Automatically clears old duty status entries to prevent data accumulation
 
 ## System Requirements
 
@@ -110,7 +111,8 @@ The processor will:
 2. Check if user mapping sync is needed
 3. Monitor for new CSV files in the configured directory
 4. Process duty status updates and sync to AtHoc
-5. Log all activities and manage processed files
+5. **Auto-cleanup old duty status entries** (runs regardless of CSV file presence)
+6. Log all activities and manage processed files
 
 ### Windows Automation
 For automated execution on Windows, see the **[Windows Scheduler Setup Guide](windows_scheduler_setup.md)** which includes:
@@ -159,7 +161,8 @@ flowchart TD
     Q --> R
     
     R --> S[Auto-cleanup Old Duty Status]
-    S --> I
+    S --> T[Log Final Summary]
+    T --> I
     
     I --> H
 ```
@@ -180,6 +183,7 @@ Benefits:
 - **Data Safety**: No file loss if sync fails
 - **Consistency**: All updates applied atomically
 - **Conflict Resolution**: Automatic handling of duplicate employee updates
+- **Automatic Cleanup**: Old duty status entries are automatically cleared to prevent data accumulation
 
 ### Data Flow
 
@@ -223,6 +227,26 @@ The system automatically syncs user mappings from AtHoc on the following schedul
 - **Immediate**: If more than configured days (default: 2) since last successful sync
 - **Retry**: If last sync returned no data or encountered errors
 - **First Run**: If never synced before
+
+### Auto-Cleanup Functionality
+
+The system automatically cleans up old duty status entries to prevent data accumulation:
+
+- **Always Runs**: Auto-cleanup executes regardless of whether CSV files are found
+- **Configurable Threshold**: Clears duty status entries older than specified hours (default: 24 hours)
+- **Safe Operation**: Only clears duty status fields, never affects user enable/disable status
+- **Batch Processing**: Efficiently processes multiple users in a single API call
+- **Logging**: All cleanup operations are logged for audit purposes
+
+**Configuration:**
+- `AUTO_CLEANUP_HOURS`: Hours after which duty status is considered old (default: 24)
+- `DUTY_STATUS_FIELD`: Field name to clear (must match AtHoc configuration)
+
+**Benefits:**
+- Prevents stale duty status data from accumulating
+- Maintains data accuracy in AtHoc
+- Reduces manual maintenance requirements
+- Ensures only current duty status is displayed
 
 ## Database Structure
 
@@ -274,21 +298,25 @@ CREATE TABLE sync_tracking (
   - User mapping sync operations
   - File management operations
   - Configuration validation
+  - Auto-cleanup operations and results
 - **DEBUG**: 
   - Individual user sync details
   - Detailed API responses
   - User mapping details per user
   - File parsing details
+  - Auto-cleanup user details
 - **WARNING**: 
   - Non-critical errors
   - Missing user mappings
   - API warnings
   - Configuration deprecations
+  - Auto-cleanup warnings
 - **ERROR**: 
   - Processing failures
   - Connection issues
   - Critical system errors
   - Data validation failures
+  - Auto-cleanup failures
 
 **Production Recommendation**: Use INFO level to avoid massive log files from individual user sync entries while maintaining visibility into operational status.
 
@@ -395,6 +423,8 @@ print(f"Found {len(batch_files)} files to process")
 - Monitor AtHoc API response times and error rates
 - Set up alerts for processing failures and file accumulation
 - **Batch Efficiency**: Monitor API call reduction from batch processing
+- **Auto-Cleanup**: Monitor cleanup operations and success rates
+- **Data Freshness**: Track duty status age and cleanup effectiveness
 
 ### Performance Benefits
 - **Reduced API Load**: Single batch call vs. multiple individual calls
