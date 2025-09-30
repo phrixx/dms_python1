@@ -112,6 +112,16 @@ class BOBODatabase:
                 )
             ''')
             
+            # Create file retry tracking table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS file_retry_tracking (
+                    filename TEXT PRIMARY KEY,
+                    retry_count INTEGER DEFAULT 0,
+                    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_retry TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
             conn.commit()
     
     def get_last_sync_date(self, sync_type: str = "user_mapping") -> Optional[str]:
@@ -209,6 +219,55 @@ class BOBODatabase:
             cursor = conn.cursor()
             cursor.execute("SELECT employee_id, username, collar_id FROM worker_mapping")
             return cursor.fetchall()
+    
+    def track_file_retry(self, filename: str) -> int:
+        """Track retry attempts for a file and return current count
+        
+        Args:
+            filename: Name of the file being retried
+            
+        Returns:
+            Current retry count for this file
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Get current retry count
+            cursor.execute(
+                "SELECT retry_count FROM file_retry_tracking WHERE filename = ?",
+                (filename,)
+            )
+            result = cursor.fetchone()
+            
+            if result:
+                retry_count = result[0] + 1
+                cursor.execute(
+                    "UPDATE file_retry_tracking SET retry_count = ?, last_retry = CURRENT_TIMESTAMP WHERE filename = ?",
+                    (retry_count, filename)
+                )
+            else:
+                retry_count = 1
+                cursor.execute(
+                    "INSERT INTO file_retry_tracking (filename, retry_count) VALUES (?, ?)",
+                    (filename, retry_count)
+                )
+            
+            conn.commit()
+            return retry_count
+    
+    def clear_file_retry_tracking(self, filename: str):
+        """Clear retry tracking for a successfully processed file
+        
+        Args:
+            filename: Name of the file that was successfully processed
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM file_retry_tracking WHERE filename = ?",
+                (filename,)
+            )
+            conn.commit()
 
 class BOBOProcessor:
     """Main processor for BOBO CSV files"""
@@ -240,6 +299,10 @@ class BOBOProcessor:
         # Logging settings
         self.log_directory = self.config['log_directory']
         self.log_purge_days = self.config['log_purge_days']
+        
+        # File retry and failure handling
+        self.max_retry_attempts = self.config['max_retry_attempts']
+        self.failed_files_directory = self.config['failed_files_directory']
     
     def _normalize_path(self, path: str) -> str:
         """Normalize UNC and mixed-separator paths (Windows-safe).
@@ -286,6 +349,10 @@ class BOBOProcessor:
         # User mapping sync settings
         config['sync_hour'] = int(os.getenv('SYNC_HOUR', '20'))  # 8pm default
         config['sync_retry_days'] = int(os.getenv('SYNC_RETRY_DAYS', '2'))  # Retry after 2 days
+        
+        # File retry and failure handling
+        config['max_retry_attempts'] = int(os.getenv('MAX_RETRY_ATTEMPTS', '5'))
+        config['failed_files_directory'] = os.getenv('FAILED_FILES_DIRECTORY', '../failed_files')
         
         return config
 
@@ -543,6 +610,48 @@ class BOBOProcessor:
             self.logger.error(f"Failed to move processed file {filepath}: {e}")
             return False
     
+    def move_to_failed_directory(self, filepath: str) -> bool:
+        """Move persistently failing file to failed directory
+        
+        Args:
+            filepath: Path to the CSV file that failed repeatedly
+            
+        Returns:
+            True if file was moved successfully, False if error occurred
+        """
+        try:
+            # Create failed directory if it doesn't exist
+            failed_dir = self.config['failed_files_directory']
+            if not os.path.isabs(failed_dir):
+                failed_dir = os.path.join(os.path.dirname(__file__), failed_dir)
+            failed_dir = self._normalize_path(failed_dir)
+            os.makedirs(failed_dir, exist_ok=True)
+            
+            # Normalize source path
+            filepath = self._normalize_path(filepath)
+            
+            # Get filename and construct destination path
+            filename = os.path.basename(filepath)
+            destination = os.path.join(failed_dir, filename)
+            destination = self._normalize_path(destination)
+            
+            # Handle filename conflicts by adding timestamp suffix
+            if os.path.exists(destination):
+                name, ext = os.path.splitext(filename)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{name}_{timestamp}{ext}"
+                destination = os.path.join(failed_dir, filename)
+                destination = self._normalize_path(destination)
+            
+            # Move the file
+            shutil.move(filepath, destination)
+            self.logger.warning(f"Moved persistently failing file to failed directory: {filename}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to move file to failed directory {filepath}: {e}")
+            return False
+    
     def parse_csv_file(self, filepath: str) -> List[BOBOEntry]:
         """Parse a single CSV file and return BOBO entries"""
         entries = []
@@ -639,7 +748,7 @@ class BOBOProcessor:
             return 0, len(duty_updates)
 
     def process_file_batch(self, batch_files: List[str], duty_status_field: str) -> Dict:
-        """Process a batch of CSV files together with a single AtHoc sync
+        """Process a batch of CSV files together with individual file success tracking
         
         Args:
             batch_files: List of CSV file paths to process together
@@ -648,18 +757,18 @@ class BOBOProcessor:
         Returns:
             Dictionary with batch processing results
         """
-        # Store file data for rollback in case of sync failure
+        # Store file data with user tracking
         file_data = {}
         all_entries = []
         all_duty_updates = []
         
-        # Phase 1: Parse all files in the batch
+        # Phase 1: Parse all files and track which users belong to which files
         for filepath in batch_files:
             filename = os.path.basename(filepath)
             self.logger.info(f"Parsing: {filename}")
             
             try:
-                # Parse CSV file but don't process yet
+                # Parse CSV file
                 entries = self.parse_csv_file(filepath)
                 
                 if not entries:
@@ -667,14 +776,24 @@ class BOBOProcessor:
                     file_data[filepath] = {
                         'filename': filename,
                         'entries': [],
+                        'file_users': set(),
+                        'has_valid_users': False,
                         'status': 'empty'
                     }
                     continue
                 
-                # Store parsed data
+                # Track users for this specific file
+                file_users = set()
+                for entry in entries:
+                    username = self.database.get_username_by_employee_id(entry.employee_id)
+                    if username:
+                        file_users.add(username)
+                
                 file_data[filepath] = {
                     'filename': filename,
                     'entries': entries,
+                    'file_users': file_users,
+                    'has_valid_users': len(file_users) > 0,
                     'status': 'parsed'
                 }
                 all_entries.extend(entries)
@@ -684,6 +803,8 @@ class BOBOProcessor:
                 file_data[filepath] = {
                     'filename': filename,
                     'entries': [],
+                    'file_users': set(),
+                    'has_valid_users': False,
                     'status': 'parse_error',
                     'error': str(e)
                 }
@@ -691,6 +812,7 @@ class BOBOProcessor:
         # Phase 2: Process all entries together if we have any
         batch_success_count = 0
         batch_error_count = 0
+        user_results = {}  # Track individual user results
         
         if all_entries:
             self.logger.info(f"Processing {len(all_entries)} entries from {len(file_data)} files as a batch")
@@ -735,30 +857,55 @@ class BOBOProcessor:
             # Phase 3: Single batch sync to AtHoc for all files
             if all_duty_updates:
                 try:
-                    batch_success_count, batch_error_count = self.batch_update_duty_status(all_duty_updates, duty_status_field)
+                    # Make single API call
+                    results = self.athoc_client.batch_update_duty_status(all_duty_updates, duty_status_field)
                     
-                    # Log individual results
+                    # Track individual user results
                     for update in all_duty_updates:
                         username = update["username"]
-                        employee_id = update["employee_id"]
-                        transaction_type = update["transaction_type"]
-                        self.logger.info(f"Synced {username} ({employee_id}) - {transaction_type}")
-                    
-                    sync_success = (batch_error_count == 0)
+                        success = results.get(username, False)
+                        user_results[username] = success
+                        
+                        if success:
+                            batch_success_count += 1
+                            self.logger.info(f"Synced {username} ({update['employee_id']}) - {update['transaction_type']}")
+                        else:
+                            batch_error_count += 1
+                            self.logger.warning(f"Failed to sync {username} ({update['employee_id']}) - {update['transaction_type']}")
                     
                 except Exception as e:
                     self.logger.error(f"Batch sync to AtHoc failed: {e}")
-                    sync_success = False
+                    # API call failed - all users failed
+                    for update in all_duty_updates:
+                        user_results[update["username"]] = False
                     batch_error_count = len(all_duty_updates)
-            else:
-                sync_success = True  # No updates needed is considered success
-        else:
-            sync_success = True  # No entries to process is considered success
-            self.logger.info("No entries found in batch to process")
         
-        # Phase 4: Handle files based on sync success
-        total_entries_processed = 0
+        # Phase 4: Determine individual file success based on user results
+        for filepath, data in file_data.items():
+            filename = data['filename']
+            file_users = data['file_users']
+            
+            if not data['has_valid_users']:
+                # No valid users - consider file successful (nothing to update)
+                data['file_success'] = True
+                data['file_error_reason'] = "No valid users found"
+                self.logger.info(f"File {filename} has no valid users - marking as successful")
+            else:
+                # Check if all users for this file succeeded
+                file_user_results = [user_results.get(user, False) for user in file_users]
+                data['file_success'] = all(file_user_results)
+                data['file_error_reason'] = "Some users failed to update" if not data['file_success'] else None
+                
+                if data['file_success']:
+                    self.logger.info(f"File {filename} processed successfully - all {len(file_users)} users updated")
+                else:
+                    failed_users = [user for user in file_users if not user_results.get(user, False)]
+                    self.logger.warning(f"File {filename} partially failed - {len(failed_users)}/{len(file_users)} users failed: {failed_users}")
+        
+        # Phase 5: Handle files based on individual success AND retry count
         files_moved = 0
+        files_failed = 0
+        total_entries_processed = 0
         
         for filepath, data in file_data.items():
             filename = data['filename']
@@ -774,31 +921,50 @@ class BOBOProcessor:
             file_entries_count = len(entries)
             total_entries_processed += file_entries_count
             
-            if sync_success:
-                # Sync was successful - log success and move file
+            if data['file_success']:
+                # File processed successfully - move to processed directory
                 self.database.log_processing(filename, file_entries_count, 
-                                           batch_success_count if file_entries_count > 0 else 0, 
+                                           len(data['file_users']) if data['has_valid_users'] else 0, 
                                            0)
                 
-                # Only move file after confirmed successful sync
+                # Clear retry tracking for successful file
+                self.database.clear_file_retry_tracking(filename)
+                
+                # Move file to processed directory
                 if self.move_processed_file(filepath):
                     files_moved += 1
                     self.logger.info(f"Successfully processed and moved: {filename}")
                 else:
                     self.logger.warning(f"Processed {filename} but failed to move to processed directory")
             else:
-                # Sync failed - log error but keep file for retry
-                self.database.log_processing(filename, file_entries_count, 0, 
-                                           batch_error_count if file_entries_count > 0 else 0,
-                                           "Batch sync to AtHoc failed")
-                self.logger.error(f"Batch sync failed - keeping {filename} for retry")
+                # File failed - check retry count
+                retry_count = self.database.track_file_retry(filename)
+                
+                if retry_count >= self.max_retry_attempts:
+                    # Move to failed directory
+                    self.database.log_processing(filename, file_entries_count, 0, 
+                                               len(data['file_users']) if data['has_valid_users'] else 0,
+                                               f"Exceeded max retry attempts ({self.max_retry_attempts})")
+                    
+                    if self.move_to_failed_directory(filepath):
+                        files_failed += 1
+                        self.logger.warning(f"File exceeded max retries ({self.max_retry_attempts}) - moved to failed directory: {filename}")
+                    else:
+                        self.logger.error(f"Failed to move file to failed directory: {filename}")
+                else:
+                    # Keep for retry
+                    self.database.log_processing(filename, file_entries_count, 0, 
+                                               len(data['file_users']) if data['has_valid_users'] else 0,
+                                               f"Retry attempt {retry_count}/{self.max_retry_attempts}: {data.get('file_error_reason', 'Unknown error')}")
+                    self.logger.warning(f"File failed (attempt {retry_count}/{self.max_retry_attempts}) - keeping for retry: {filename}")
         
         return {
             'entries_processed': total_entries_processed,
             'success_count': batch_success_count,
             'error_count': batch_error_count,
             'files_moved': files_moved,
-            'sync_success': sync_success
+            'files_failed': files_failed,
+            'file_results': {path: data['file_success'] for path, data in file_data.items()}
         }
 
     def process_directory(self):
@@ -833,6 +999,7 @@ class BOBOProcessor:
         total_success = 0
         total_errors = 0
         total_files_moved = 0
+        total_files_failed = 0
         
         for i in range(0, len(csv_files), self.batch_size):
             batch_files = csv_files[i:i + self.batch_size]
@@ -847,13 +1014,13 @@ class BOBOProcessor:
             total_success += batch_result['success_count']
             total_errors += batch_result['error_count']
             total_files_moved += batch_result['files_moved']
+            total_files_failed += batch_result['files_failed']
             
-            if batch_result['sync_success']:
-                self.logger.info(f"Batch {batch_num} completed successfully: "
-                               f"{batch_result['entries_processed']} entries, "
-                               f"{batch_result['files_moved']} files moved")
-            else:
-                self.logger.error(f"Batch {batch_num} failed - files retained for retry")
+            # Log batch results
+            self.logger.info(f"Batch {batch_num} completed: "
+                           f"{batch_result['entries_processed']} entries processed, "
+                           f"{batch_result['files_moved']} files moved, "
+                           f"{batch_result['files_failed']} files moved to failed directory")
         
         # Auto-cleanup old duty status (when CSV files were processed)
         self.auto_cleanup_old_duty_status(duty_status_field)
@@ -861,7 +1028,8 @@ class BOBOProcessor:
         # Final summary
         self.logger.info(f"Processing complete: {total_processed} entries processed, "
                         f"{total_success} successful updates, {total_errors} errors, "
-                        f"{total_files_moved} files moved to processed directory")
+                        f"{total_files_moved} files moved to processed directory, "
+                        f"{total_files_failed} files moved to failed directory")
 
     def auto_cleanup_old_duty_status(self, duty_status_field: str = "DUTY_STATUS"):
         """Auto-cleanup users with old duty status timestamps"""

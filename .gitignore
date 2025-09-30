@@ -193,6 +193,7 @@ Thumbs.db
 crown_files/
 processed_files/
 simulator/
+bad_batch_examples/
 notes.txt
 bobo_mapping.db
 *.csv
