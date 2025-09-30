@@ -56,6 +56,41 @@ cd dms_python/bobosync
 pip install -r requirements.txt
 ```
 
+### Offline / Air‑Gapped Installation (Recommended for customer servers)
+
+If the target server cannot access the internet, pre-download wheels on a machine with internet access, copy them to the server, and install locally.
+
+1) On a machine with internet access, download wheels into the `packages` folder:
+
+```bash
+# Example for Windows Server (64-bit) running CPython 3.11
+cd bobosync
+pip download -r requirements.txt \
+  --platform win_amd64 \
+  --only-binary=:all: \
+  --implementation cp \
+  --python-version 3.11 \
+  -d ./packages
+```
+
+Examples for other environments (adjust platform and Python version):
+- Windows (Python 3.13): `--platform win_amd64 --python-version 3.13`
+- Linux x86_64 (Python 3.11): `--platform manylinux_2_28_x86_64 --python-version 3.11`
+- macOS arm64 (Python 3.11): `--platform macosx_12_0_arm64 --python-version 3.11`
+
+2) Copy the `packages/` directory to the target server (keep next to `requirements.txt`).
+
+3) On the target server, install from local wheels (no internet):
+
+```bash
+cd bobosync
+pip install --no-index --find-links ./packages -r requirements.txt
+```
+
+Notes:
+- Ensure the `--python-version` and `--platform` match the target server’s Python and OS.
+- Re-run the download step if you change Python version or platform.
+
 3. **Configure environment**
 ```bash
 cp .env_safe .env
