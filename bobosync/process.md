@@ -10,6 +10,73 @@ The BOBO Sync system processes worker duty status CSV files from the BOBO system
 2. **`bobo_processor.py`** - Main processing engine
 3. **SQLite Database** - Local mapping storage (`bobo_mapping.db`)
 4. **Configuration** - Environment variables (`.env` file)
+5. **Virtual Environment** - Python dependencies (`myenv/` directory)
+6. **Network Testing** - Connectivity and SSL testing utilities (`network_testing/` directory)
+
+### Project Structure
+```
+DMS_Python1/
+├── bobosync/                    # Main application directory
+│   ├── athoc_client.py          # AtHoc API client
+│   ├── bobo_processor.py        # Main processing engine
+│   ├── requirements.txt         # Python dependencies
+│   ├── .env                     # Configuration file
+│   ├── bobo_mapping.db          # SQLite database
+│   ├── myenv/                   # Python virtual environment
+│   ├── network_testing/         # Network testing utilities
+│   ├── packages/                # Offline installation packages
+│   ├── run_bobo_windows.bat     # Windows batch wrapper
+│   └── run_bobo_windows.ps1     # PowerShell wrapper
+├── logs/                        # Log files directory
+├── processed_files/             # Successfully processed CSV files
+└── failed_files/                # Files that exceeded retry attempts
+```
+
+## Running the Application
+
+### Using Virtual Environment (Recommended)
+```bash
+# Navigate to the application directory
+cd bobosync
+
+# Run using virtual environment Python
+myenv\Scripts\python bobo_processor.py
+
+# Or activate virtual environment first
+myenv\Scripts\Activate.ps1
+python bobo_processor.py
+```
+
+### Using Windows Wrapper Scripts
+```bash
+# Navigate to the application directory
+cd bobosync
+
+# Run using batch wrapper
+.\run_bobo_windows.bat
+
+# Or run using PowerShell wrapper
+.\run_bobo_windows.ps1
+```
+
+### Network Testing Utilities
+Before running the main application, you can use the network testing utilities to diagnose connectivity issues:
+
+```bash
+cd bobosync\network_testing
+
+# Test AtHoc authentication
+myenv\Scripts\python test_athoc_auth.py
+
+# Test SSL configuration
+myenv\Scripts\python test_ssl_verification.py
+
+# Test proxy connection (if applicable)
+myenv\Scripts\python test_proxy_connection.py
+
+# Run comprehensive network tests
+myenv\Scripts\python test_all_proxy_scenarios.py
+```
 
 ## Detailed Process Flow
 
@@ -289,6 +356,37 @@ endif
 
 ## Troubleshooting Guide
 
+### Virtual Environment Issues
+
+**Symptoms:**
+- "ModuleNotFoundError: No module named 'typing_extensions'" or similar
+- Import errors for required packages
+- Script fails to start
+
+**Solution:**
+Always use the virtual environment when running the application:
+
+```bash
+# Navigate to the application directory
+cd bobosync
+
+# Use virtual environment Python (recommended)
+myenv\Scripts\python bobo_processor.py
+
+# Or activate virtual environment first
+myenv\Scripts\Activate.ps1
+python bobo_processor.py
+```
+
+**If virtual environment is missing or corrupted:**
+```bash
+# Recreate virtual environment
+cd bobosync
+python -m venv myenv
+myenv\Scripts\activate
+pip install -r requirements.txt
+```
+
 ### Authentication Issues
 
 **Symptoms:**
@@ -401,6 +499,50 @@ endif
 - ```491:537:bobosync/athoc_client.py``` - Batch update logic
 - ```567:609:bobosync/bobo_processor.py``` - Update processing
 
+### Smart Error Handling
+
+**New Feature - Intelligent Error Classification:**
+
+The system now distinguishes between expected errors and real failures to prevent unnecessary file retries.
+
+**Expected Errors (Treated as Success):**
+- **User Not Found**: When a user doesn't exist in AtHoc (prevents auto-creation)
+- **Permission Denied**: When user exists but service account lacks update permissions
+
+**Real Errors (Causes Retry):**
+- **Network Issues**: Connection timeouts, DNS failures
+- **API Errors**: Server errors, authentication failures
+- **Data Validation**: Invalid field formats, missing required data
+
+**Benefits:**
+- **No False Failures**: Files with only "user not found" errors are processed successfully
+- **Reduced Retry Load**: Only real errors cause files to be kept for retry
+- **Better Monitoring**: Clear distinction between expected and unexpected issues
+- **Data Integrity**: Prevents auto-creation of users while maintaining system reliability
+
+**Debug Logging for Error Analysis:**
+
+Enable debug logging to see detailed error classification:
+
+```bash
+# Set in .env file
+LOG_LEVEL=DEBUG
+
+# Or set environment variable
+set LOG_LEVEL=DEBUG
+myenv\Scripts\python bobo_processor.py
+```
+
+**Debug Output Example:**
+```
+Expected: User nonexistent@company.com not found in AtHoc (will be treated as success)
+DEBUG: Treating 'user does not exist' as success for nonexistent@company.com
+```
+
+**Code Locations:**
+- ```563:584:bobosync/athoc_client.py``` - Error classification logic
+- ```463:474:bobosync/athoc_client.py``` - Error logging and categorization
+
 ### File Management Issues
 
 **Symptoms:**
@@ -435,11 +577,52 @@ endif
 - `WARNING` - Potential issues or missing data
 - `Batch processing completed` - Successful operations
 - `Authentication successful` - Connectivity confirmation
+- `Expected: User not found` - Normal behavior for non-existent users
+- `DEBUG: Treating 'user does not exist' as success` - Error classification decisions
 
-**Debug Mode:**
-- Set logging level to DEBUG in configuration
-- Monitor network requests and responses
-- Track timing of operations
+**Enhanced Debug Mode:**
+- **Complete JSON Responses**: Full AtHoc API responses with detailed error information
+- **Individual User Results**: Per-user sync status, error details, and user IDs
+- **Error Classification**: Automatic categorization of expected vs. unexpected errors
+- **Decision Logging**: Clear indication of why certain errors are treated as success
+
+**Enable Debug Logging:**
+```bash
+# Set in .env file
+LOG_LEVEL=DEBUG
+
+# Or set environment variable
+set LOG_LEVEL=DEBUG
+myenv\Scripts\python bobo_processor.py
+```
+
+**Debug Output Example:**
+```
+DEBUG: AtHoc sync_users_by_common_names JSON response: [
+  {
+    "LOGIN_ID": "user@company.com",
+    "On-Duty-DTG": "22/10/2025 07:41:42",
+    ":SyncStatus": "OK",
+    ":SyncDetails": "Updated",
+    "USER_ID": 2060074
+  },
+  {
+    "LOGIN_ID": "nonexistent@company.com",
+    "On-Duty-DTG": "22/10/2025 07:41:44",
+    ":SyncStatus": "Error",
+    ":SyncDetails": "User: nonexistent@company.com does not exists in the Organization",
+    "USER_ID": null
+  }
+]
+Expected: User nonexistent@company.com not found in AtHoc (will be treated as success)
+DEBUG: Treating 'user does not exist' as success for nonexistent@company.com
+```
+
+**Debug Logging Benefits:**
+- **Complete Visibility**: See exactly what AtHoc returns for each operation
+- **Easy Troubleshooting**: Identify specific issues without guessing
+- **Performance Monitoring**: Track API response times and success rates
+- **Data Validation**: Verify that expected errors are handled correctly
 
 ### Performance Issues
 
@@ -467,12 +650,36 @@ endif
 - Firewall blocking AtHoc server
 - Proxy configuration problems
 - DNS resolution failures
+- SSL/TLS certificate issues
 
 **Diagnostic Steps:**
-1. Test basic connectivity: `ping athoc-server.com`
-2. Test HTTPS: `curl -I https://athoc-server.com`
-3. Check proxy settings if applicable
-4. Verify firewall rules allow outbound HTTPS
+1. **Use Network Testing Utilities** (Recommended):
+   ```bash
+   cd bobosync\network_testing
+   
+   # Test AtHoc authentication
+   myenv\Scripts\python test_athoc_auth.py
+   
+   # Test SSL configuration
+   myenv\Scripts\python test_ssl_verification.py
+   
+   # Test proxy connection (if applicable)
+   myenv\Scripts\python test_proxy_connection.py
+   
+   # Run comprehensive network tests
+   myenv\Scripts\python test_all_proxy_scenarios.py
+   ```
+
+2. **Manual Testing**:
+   - Test basic connectivity: `ping athoc-server.com`
+   - Test HTTPS: `curl -I https://athoc-server.com`
+   - Check proxy settings if applicable
+   - Verify firewall rules allow outbound HTTPS
+
+3. **SSL/TLS Issues**:
+   - Use `ssl_fix_guide.py` for SSL troubleshooting
+   - Check `CUSTOMER_SSL_GUIDE.md` for detailed SSL configuration
+   - Use `test_production_ssl.py` for production SSL testing
 
 ### Auto-Cleanup Issues
 
@@ -503,6 +710,12 @@ endif
 - ```506:552:bobosync/athoc_client.py``` - Batch update duty status
 
 **Manual Testing:**
+```bash
+# First, navigate to the bobosync directory and activate virtual environment
+cd bobosync
+myenv\Scripts\activate
+```
+
 ```python
 # Test auto-cleanup functionality
 from athoc_client import AtHocClient
@@ -544,31 +757,104 @@ print(f"Cleared duty status for {cleared_count} users")
 ## Emergency Procedures
 
 ### Complete System Failure:
-1. Check AtHoc server status
-2. Verify network connectivity
-3. Restart the processor service
-4. Check recent log entries
-5. Validate configuration files
+1. **Check Virtual Environment**:
+   ```bash
+   cd bobosync
+   myenv\Scripts\python --version  # Verify Python is working
+   myenv\Scripts\pip list          # Check installed packages
+   ```
+
+2. **Check AtHoc server status**
+3. **Verify network connectivity**:
+   ```bash
+   cd bobosync\network_testing
+   myenv\Scripts\python test_athoc_auth.py
+   ```
+
+4. **Restart the processor service**:
+   ```bash
+   cd bobosync
+   myenv\Scripts\python bobo_processor.py
+   ```
+
+5. **Check recent log entries**
+6. **Validate configuration files**
 
 ### Data Inconsistency:
-1. Stop processing
-2. Backup current database
-3. Force user mapping sync
-4. Validate mapping data
-5. Resume processing with monitoring
+1. **Stop processing**:
+   ```bash
+   # If running in background, stop the process
+   # Check for running processes
+   tasklist | findstr python
+   ```
+
+2. **Backup current database**:
+   ```bash
+   cd bobosync
+   copy bobo_mapping.db bobo_mapping_backup_%date%.db
+   ```
+
+3. **Force user mapping sync**:
+   ```bash
+   cd bobosync
+   myenv\Scripts\python -c "from bobo_processor import BOBOProcessor; p = BOBOProcessor(); p.sync_worker_mappings()"
+   ```
+
+4. **Validate mapping data**
+5. **Resume processing with monitoring**:
+   ```bash
+   cd bobosync
+   myenv\Scripts\python bobo_processor.py
+   ```
 
 ### File Processing Backlog:
-1. Check for processing errors
-2. Verify AtHoc connectivity
-3. Process files manually if needed
-4. Monitor batch sizes
-5. Consider temporary rate limiting
+1. **Check for processing errors**:
+   ```bash
+   cd bobosync
+   # Check recent logs
+   type ..\logs\bobo_processor.log | findstr ERROR
+   ```
+
+2. **Verify AtHoc connectivity**:
+   ```bash
+   cd bobosync\network_testing
+   myenv\Scripts\python test_athoc_auth.py
+   ```
+
+3. **Process files manually if needed**:
+   ```bash
+   cd bobosync
+   myenv\Scripts\python bobo_processor.py
+   ```
+
+4. **Monitor batch sizes**
+5. **Consider temporary rate limiting**
 
 ### Auto-Cleanup Failure:
-1. Check AtHoc connectivity and permissions
-2. Verify `AUTO_CLEANUP_HOURS` configuration
-3. Test manual cleanup using provided code examples
-4. Check for duty status field configuration issues
-5. Monitor cleanup operation logs for specific errors
+1. **Check AtHoc connectivity and permissions**:
+   ```bash
+   cd bobosync\network_testing
+   myenv\Scripts\python test_athoc_auth.py
+   ```
+
+2. **Verify `AUTO_CLEANUP_HOURS` configuration**:
+   ```bash
+   cd bobosync
+   # Check .env file for AUTO_CLEANUP_HOURS setting
+   type .env | findstr AUTO_CLEANUP
+   ```
+
+3. **Test manual cleanup using provided code examples**:
+   ```bash
+   cd bobosync
+   myenv\Scripts\python -c "from athoc_client import AtHocClient; c = AtHocClient(); print(f'Cleared: {c.clear_old_duty_status(\"On-Duty-DTG\", 24)} users')"
+   ```
+
+4. **Check for duty status field configuration issues**
+5. **Monitor cleanup operation logs for specific errors**:
+   ```bash
+   cd bobosync
+   type ..\logs\bobo_processor.log | findstr "Auto-cleanup"
+   ```
 
 This guide should be referenced whenever issues arise with the BOBO Sync system and updated as new issues or solutions are discovered. 

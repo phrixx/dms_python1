@@ -1,4 +1,6 @@
 import os
+import json
+import logging
 import requests
 import ssl
 from typing import Dict, List
@@ -438,6 +440,19 @@ class AtHocClient:
             
             results = response.json()
             
+            # Debug logging: Log full JSON response when debug level is enabled
+            debug_mode = os.getenv('LOG_LEVEL', 'INFO').upper() == 'DEBUG'
+            if debug_mode:
+                print(f"DEBUG: AtHoc sync_users_by_common_names JSON response: {json.dumps(results, indent=2)}")
+                # Also try to use logger if available
+                try:
+                    import logging
+                    logger = logging.getLogger('BOBOProcessor')
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"AtHoc sync_users_by_common_names JSON response: {json.dumps(results, indent=2)}")
+                except:
+                    pass
+            
             # Log summary of results
             success_count = sum(1 for r in results if r.get(":SyncStatus") == "OK")
             error_count = sum(1 for r in results if r.get(":SyncStatus") == "Error")
@@ -450,7 +465,13 @@ class AtHocClient:
                 if result.get(":SyncStatus") in ["Error", "Partial"]:
                     login_id = result.get("LOGIN_ID", "Unknown")
                     details = result.get(":SyncDetails", "No details")
-                    print(f"Sync issue for {login_id}: {result.get(':SyncStatus')} - {details}")
+                    sync_status = result.get(":SyncStatus")
+                    
+                    # Distinguish between expected and unexpected errors
+                    if sync_status == "Error" and "does not exists in the Organization" in details:
+                        print(f"Expected: User {login_id} not found in AtHoc (will be treated as success)")
+                    else:
+                        print(f"Sync issue for {login_id}: {sync_status} - {details}")
             
             return results
             
@@ -521,14 +542,23 @@ class AtHocClient:
         users_data = []
         for update in duty_updates:
             username = update.get("username")
-            duty_datetime = update.get("duty_datetime")
+            duty_datetime = update.get("datetime")
             
             if not username:
                 continue
+            
+            # Format datetime for AtHoc (DD/MM/YYYY HH:MM:SS format)
+            if duty_datetime:
+                if isinstance(duty_datetime, datetime):
+                    formatted_datetime = duty_datetime.strftime("%d/%m/%Y %H:%M:%S")
+                else:
+                    formatted_datetime = str(duty_datetime)
+            else:
+                formatted_datetime = ""
                 
             user_data = {
                 "LOGIN_ID": username,
-                duty_status_field: duty_datetime or ""
+                duty_status_field: formatted_datetime
             }
             users_data.append(user_data)
         
@@ -541,7 +571,21 @@ class AtHocClient:
             for result in results:
                 username = result.get("LOGIN_ID")
                 sync_status = result.get(":SyncStatus")
-                status_map[username] = (sync_status == "OK")
+                sync_details = result.get(":SyncDetails", "")
+                
+                # Consider it successful if:
+                # 1. Sync status is "OK" (normal success)
+                # 2. Sync status is "Error" but it's because user doesn't exist (expected behavior)
+                is_success = (
+                    sync_status == "OK" or 
+                    (sync_status == "Error" and "does not exists in the Organization" in sync_details)
+                )
+                
+                status_map[username] = is_success
+                
+                # Log the decision for debugging
+                if sync_status == "Error" and "does not exists in the Organization" in sync_details:
+                    print(f"DEBUG: Treating 'user does not exist' as success for {username}")
             
             return status_map
             
@@ -616,7 +660,7 @@ class AtHocClient:
         
         # Prepare batch update to clear duty status
         duty_updates = [
-            {"username": username, "duty_datetime": None}
+            {"username": username, "datetime": None}
             for username in old_duty_users
         ]
         

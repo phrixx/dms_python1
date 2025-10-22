@@ -40,9 +40,9 @@ if not exist "bobo_processor.py" (
     exit /b 1
 )
 
-REM Run the processor
-echo %date% %time%: Executing python bobo_processor.py >> !logfile!
-python bobo_processor.py >> !logfile! 2>&1
+REM Run the processor using virtual environment
+echo %date% %time%: Executing myenv\Scripts\python bobo_processor.py >> !logfile!
+myenv\Scripts\python bobo_processor.py >> !logfile! 2>&1
 
 if errorlevel 1 (
     echo %date% %time%: BOBO processor failed with error level !errorlevel! >> !logfile!

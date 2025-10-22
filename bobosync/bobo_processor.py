@@ -306,7 +306,7 @@ class BOBOProcessor:
     
     def _normalize_path(self, path: str) -> str:
         """Normalize UNC and mixed-separator paths (Windows-safe).
-        Accepts both //server/share and \\server\share inputs and normalizes separators.
+        Accepts both //server/share and \\\\server\\share inputs and normalizes separators.
         """
         try:
             if isinstance(path, str):
