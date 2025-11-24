@@ -410,32 +410,34 @@ class BOBOProcessor:
         return logger
 
     def _purge_old_logs(self, log_dir: str):
-        """Purge log files older than configured days"""
+        """Remove *all* log files in the log directory older than the purge window."""
         try:
             cutoff_time = datetime.now() - timedelta(days=self.config['log_purge_days'])
-            
-            # Find all log files (including rotated ones)
-            log_pattern = os.path.join(log_dir, 'bobo_processor.log*')
-            log_files = glob.glob(log_pattern)
-            
             purged_count = 0
-            for log_file in log_files:
-                # Skip the current log file (without date suffix)
-                if log_file.endswith('bobo_processor.log'):
+            log_path = Path(log_dir)
+            if not log_path.exists():
+                return
+
+            for entry in log_path.iterdir():
+                if not entry.is_file():
                     continue
-                    
+
+                name_lower = entry.name.lower()
+                if not (name_lower.endswith(".log") or ".log." in name_lower):
+                    continue
+
                 try:
-                    file_mtime = datetime.fromtimestamp(os.path.getmtime(log_file))
+                    file_mtime = datetime.fromtimestamp(entry.stat().st_mtime)
                     if file_mtime < cutoff_time:
-                        os.remove(log_file)
+                        entry.unlink()
                         purged_count += 1
-                        print(f"Purged old log file: {os.path.basename(log_file)}")
+                        print(f"Purged old log file: {entry.name}")
                 except OSError as e:
-                    print(f"Warning: Could not purge log file {log_file}: {e}")
-            
+                    print(f"Warning: Could not purge log file {entry}: {e}")
+
             if purged_count > 0:
-                print(f"Purged {purged_count} old log files older than {self.config['log_purge_days']} days")
-                
+                print(f"Purged {purged_count} log file(s) older than {self.config['log_purge_days']} days")
+
         except Exception as e:
             print(f"Warning: Error during log purging: {e}")
     
