@@ -19,14 +19,26 @@ from logging.handlers import TimedRotatingFileHandler
 from dataclasses import dataclass
 from typing_extensions import Self
 
-# Load environment variables from .env file
+# Load environment variables from .env file with secure encryption support
 try:
-    from dotenv import load_dotenv
-    # Load .env file from the same directory as this script
+    from secure_env import load_secure_env
+    # Load and decrypt .env file (automatically encrypts sensitive fields on first run)
     env_path = Path(__file__).parent / '.env'
-    load_dotenv(env_path)
+    secure_config = load_secure_env(env_path, auto_encrypt=True)
+    # Set environment variables for compatibility with existing code
+    import os
+    for key, value in secure_config.items():
+        if value is not None:
+            os.environ[key] = value
 except ImportError:
-    print("WARNING: python-dotenv not installed. Environment variables must be set manually.")
+    # Fallback to standard dotenv if secure_env not available
+    try:
+        from dotenv import load_dotenv
+        env_path = Path(__file__).parent / '.env'
+        load_dotenv(env_path)
+        print("WARNING: Using standard .env loading (secure_env not available). Install cryptography for encryption support.")
+    except ImportError:
+        print("WARNING: python-dotenv not installed. Environment variables must be set manually.")
 except Exception as e:
     print(f"WARNING: Could not load .env file: {e}")
 
@@ -201,6 +213,34 @@ class BOBODatabase:
             ''', (employee_id, username, collar_id))
             conn.commit()
     
+    def purge_missing_mappings(self, valid_employee_ids: set):
+        """Remove mappings for employee_ids that are no longer in AtHoc
+        
+        Args:
+            valid_employee_ids: Set of employee_ids that currently exist in AtHoc
+            
+        Returns:
+            Number of mappings purged
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            # Get all current employee_ids from database
+            cursor.execute("SELECT employee_id FROM worker_mapping")
+            db_employee_ids = {row[0] for row in cursor.fetchall()}
+            
+            # Find employee_ids in DB but not in AtHoc
+            to_delete = db_employee_ids - valid_employee_ids
+            
+            if to_delete:
+                placeholders = ','.join('?' * len(to_delete))
+                cursor.execute(
+                    f"DELETE FROM worker_mapping WHERE employee_id IN ({placeholders})",
+                    tuple(to_delete)
+                )
+                conn.commit()
+                return len(to_delete)
+        return 0
+    
     def log_processing(self, filename: str, entries_processed: int, 
                       success_count: int, error_count: int, errors: str = ""):
         """Log file processing results"""
@@ -289,6 +329,7 @@ class BOBOProcessor:
         self.csv_directory = self.config['csv_directory']
         self.processed_directory = self.config['processed_directory']
         self.move_processed_files = self.config['move_processed_files']
+        self.processed_files_purge_days = self.config['processed_files_purge_days']
         self.duty_status_field = self.config['duty_status_field']
         
         # User mapping sync settings
@@ -341,6 +382,7 @@ class BOBOProcessor:
         # File processing configuration
         config['processed_directory'] = os.getenv('PROCESSED_DIRECTORY', '../processed_files')
         config['move_processed_files'] = os.getenv('MOVE_PROCESSED_FILES', 'false').lower() == 'true'
+        config['processed_files_purge_days'] = int(os.getenv('PROCESSED_FILES_PURGE_DAYS', '30'))
         
         # Logging configuration
         config['log_directory'] = os.getenv('LOG_DIRECTORY', '../logs')
@@ -405,6 +447,9 @@ class BOBOProcessor:
         # Purge old log files on startup
         self._purge_old_logs(log_dir)
         
+        # Purge old processed files on startup
+        self._purge_old_processed_files()
+
         logger.info(f"Logging initialized - Directory: {log_dir}, Purge after: {self.config['log_purge_days']} days")
         
         return logger
@@ -441,13 +486,67 @@ class BOBOProcessor:
         except Exception as e:
             print(f"Warning: Error during log purging: {e}")
     
+    def _purge_old_processed_files(self):
+        """Remove processed CSV files older than the configured purge window"""
+        self.logger.debug(f"Entering _purge_old_processed_files() - purge_days={self.processed_files_purge_days}")
+        try:
+            # Skip if purge days is 0 or negative (disabled)
+            if self.processed_files_purge_days <= 0:
+                self.logger.debug("Exiting _purge_old_processed_files() - purging disabled")
+                return
+            
+            cutoff_time = datetime.now() - timedelta(days=self.processed_files_purge_days)
+            purged_count = 0
+            
+            # Get processed directory path
+            processed_dir = self.config['processed_directory']
+            if not os.path.isabs(processed_dir):
+                processed_dir = os.path.join(os.path.dirname(__file__), processed_dir)
+            processed_dir = self._normalize_path(processed_dir)
+            
+            processed_path = Path(processed_dir)
+            if not processed_path.exists():
+                return
+            
+            for entry in processed_path.iterdir():
+                if not entry.is_file():
+                    continue
+                
+                # Only process CSV files
+                if not entry.name.lower().endswith('.csv'):
+                    continue
+                
+                try:
+                    file_mtime = datetime.fromtimestamp(entry.stat().st_mtime)
+                    if file_mtime < cutoff_time:
+                        entry.unlink()
+                        purged_count += 1
+                        self.logger.info(f"Purged old processed file: {entry.name} (age: {(datetime.now() - file_mtime).days} days)")
+                except OSError as e:
+                    self.logger.warning(f"Could not purge processed file {entry.name}: {e}")
+                except Exception as e:
+                    self.logger.warning(f"Error checking processed file {entry.name}: {e}")
+            
+            if purged_count > 0:
+                self.logger.info(f"Purged {purged_count} processed file(s) older than {self.processed_files_purge_days} days")
+            else:
+                self.logger.debug("No processed files to purge")
+            self.logger.debug(f"Exiting _purge_old_processed_files() - purged {purged_count} files")
+        except Exception as e:
+            self.logger.error(f"Error purging old processed files: {e}")
+            self.logger.debug(f"Exiting _purge_old_processed_files() - failure: {e}")
+    
     def connect_athoc(self):
         """Connect to AtHoc and create client"""
+        self.logger.debug("Entering connect_athoc()")
         try:
+            self.logger.debug("Creating AtHocClient instance...")
             self.athoc_client = AtHocClient()
             self.logger.info("Successfully connected to AtHoc")
+            self.logger.debug("Exiting connect_athoc() - success")
         except Exception as e:
             self.logger.error(f"Failed to connect to AtHoc: {e}")
+            self.logger.debug("Exiting connect_athoc() - failure")
             raise
 
     def should_run_user_mapping_sync(self) -> bool:
@@ -461,6 +560,7 @@ class BOBOProcessor:
         - More than configured retry days since last successful sync, OR  
         - Last sync had no data or errors (allow retry)
         """
+        self.logger.debug("Entering should_run_user_mapping_sync()")
         now = datetime.now()
         current_date = now.strftime("%Y-%m-%d")
         current_hour = now.hour
@@ -485,36 +585,46 @@ class BOBOProcessor:
         # Reason 1: More than configured retry days since last sync - run immediately
         if days_since_sync > self.sync_retry_days:
             self.logger.info(f"User mapping sync overdue - {days_since_sync} days since last sync (max: {self.sync_retry_days})")
+            self.logger.debug(f"Exiting should_run_user_mapping_sync() - returning True (overdue)")
             return True
         
         # Reason 2: Last sync had issues - allow retry regardless of time
         if last_sync_status in ["no_data", "error"]:
             self.logger.info(f"User mapping sync retry - last status: {last_sync_status}")
+            self.logger.debug(f"Exiting should_run_user_mapping_sync() - returning True (retry needed)")
             return True
         
         # Reason 3: Normal schedule - after configured hour and not done today
         if current_hour < self.sync_hour:
             self.logger.debug(f"User mapping sync scheduled for {self.sync_hour}:00 - current time: {now.strftime('%H:%M')}")
+            self.logger.debug(f"Exiting should_run_user_mapping_sync() - returning False (before sync hour)")
             return False
         
         if last_sync_date == current_date:
             self.logger.debug(f"User mapping sync already completed today: {last_sync_date}")
+            self.logger.debug(f"Exiting should_run_user_mapping_sync() - returning False (already synced today)")
             return False
         
         self.logger.info(f"User mapping sync due - scheduled run after {self.sync_hour}:00")
+        self.logger.debug(f"Exiting should_run_user_mapping_sync() - returning True (scheduled)")
         return True
 
     def sync_worker_mappings(self):
         """Sync worker mappings from AtHoc using configured field names"""
+        self.logger.debug("Entering sync_worker_mappings()")
         # Check if sync should run based on schedule
         if not self.should_run_user_mapping_sync():
+            self.logger.debug("Exiting sync_worker_mappings() - sync not needed")
             return
             
         self.logger.info("Starting scheduled user mapping sync...")
+        self.logger.debug(f"User attributes to retrieve: {self.config['user_attributes']}")
         
         try:
             # Query AtHoc for all users with collar_id field from config
+            self.logger.debug("Querying AtHoc for all users with attributes...")
             users_data = self.athoc_client.get_all_users_with_attributes(self.config['user_attributes'])
+            self.logger.debug(f"Retrieved {len(users_data)} users from AtHoc")
             
             if not users_data:
                 self.logger.warning("No users returned from AtHoc user attributes query")
@@ -522,6 +632,25 @@ class BOBOProcessor:
                 self.database.update_sync_tracking("user_mapping", "no_data")
                 return
             
+            # Collect all valid employee_ids from AtHoc
+            self.logger.debug("Collecting employee IDs from AtHoc user data...")
+            athoc_employee_ids = set()
+            for username, user_data in users_data.items():
+                collar_id = user_data.get(self.config['collar_id_field'], '')
+                if collar_id and collar_id.strip():
+                    athoc_employee_ids.add(collar_id.strip())
+            self.logger.debug(f"Found {len(athoc_employee_ids)} unique employee IDs in AtHoc")
+            
+            # Purge mappings that no longer exist in AtHoc
+            self.logger.debug("Purging mappings that no longer exist in AtHoc...")
+            purged_count = self.database.purge_missing_mappings(athoc_employee_ids)
+            if purged_count > 0:
+                self.logger.info(f"Purged {purged_count} mapping(s) that no longer exist in AtHoc")
+            else:
+                self.logger.debug("No mappings to purge")
+            
+            # Update/add mappings for current users
+            self.logger.debug("Updating/adding mappings for current users...")
             synced_count = 0
             for username, user_data in users_data.items():
                 # Get collar_id from the configured field
@@ -536,22 +665,27 @@ class BOBOProcessor:
             
             # Update sync tracking
             self.database.update_sync_tracking("user_mapping", "completed")
-            self.logger.info(f"User mapping sync completed - {synced_count} mappings updated")
+            self.logger.info(f"User mapping sync completed - {synced_count} mappings updated, {purged_count} mappings purged")
+            self.logger.debug(f"Exiting sync_worker_mappings() - success (synced: {synced_count}, purged: {purged_count})")
             
         except Exception as e:
             self.logger.error(f"Failed to sync worker mappings: {e}")
             # Update tracking with error status
             self.database.update_sync_tracking("user_mapping", "error")
+            self.logger.debug(f"Exiting sync_worker_mappings() - failure: {e}")
             raise
     
     def get_csv_files(self, directory: str) -> List[str]:
         """Get all CSV files in directory, sorted by modification time (oldest first)"""
+        self.logger.debug(f"Entering get_csv_files(directory='{directory}')")
         # Normalize directory (handles //UNC and mixed separators on Windows)
         directory = self._normalize_path(directory)
         csv_pattern = os.path.join(directory, "*.csv")
         csv_pattern = self._normalize_path(csv_pattern)
         self.logger.info(f"Searching for CSV files in {directory}")
+        self.logger.debug(f"CSV pattern: {csv_pattern}")
         csv_files = [self._normalize_path(p) for p in glob.glob(csv_pattern)]
+        self.logger.debug(f"Found {len(csv_files)} CSV files before sorting")
         
         # Sort by modification time (oldest first)
         def _safe_mtime(p: str) -> float:
@@ -563,10 +697,16 @@ class BOBOProcessor:
         csv_files.sort(key=_safe_mtime)
         
         self.logger.info(f"Found {len(csv_files)} CSV files in {directory}")
+        if csv_files:
+            self.logger.debug(f"Oldest file: {os.path.basename(csv_files[0])}, Newest file: {os.path.basename(csv_files[-1])}")
+        self.logger.debug(f"Exiting get_csv_files() - returning {len(csv_files)} files")
         return csv_files
     
     def move_processed_file(self, filepath: str) -> bool:
         """Move a processed CSV file to the processed directory if configured
+        
+        Uses a two-step process (copy then delete) to better handle permission errors
+        and provide more meaningful error messages.
         
         Args:
             filepath: Path to the CSV file that was processed
@@ -581,6 +721,19 @@ class BOBOProcessor:
         try:
             # Normalize source path
             filepath = self._normalize_path(filepath)
+            
+            # Check if source file exists and is readable
+            if not os.path.exists(filepath):
+                self.logger.warning(f"Source file does not exist: {filepath}")
+                return False
+            
+            if not os.access(filepath, os.R_OK):
+                self.logger.error(
+                    f"PERMISSION ERROR: Cannot read source file {filepath}. "
+                    f"Check read permissions on the file and parent directory."
+                )
+                return False
+            
             # Get processed directory path (convert relative to absolute if needed)
             processed_dir = self.config['processed_directory']
             if not os.path.isabs(processed_dir):
@@ -588,7 +741,22 @@ class BOBOProcessor:
             processed_dir = self._normalize_path(processed_dir)
             
             # Create processed directory if it doesn't exist
-            os.makedirs(processed_dir, exist_ok=True)
+            try:
+                os.makedirs(processed_dir, exist_ok=True)
+            except PermissionError as e:
+                self.logger.error(
+                    f"PERMISSION ERROR: Cannot create/write to processed directory {processed_dir}. "
+                    f"Check write permissions on the directory. Error: {e}"
+                )
+                return False
+            
+            # Check write permissions on processed directory
+            if not os.access(processed_dir, os.W_OK):
+                self.logger.error(
+                    f"PERMISSION ERROR: No write permission on processed directory {processed_dir}. "
+                    f"Check write permissions on the directory."
+                )
+                return False
             
             # Get filename and construct destination path
             filename = os.path.basename(filepath)
@@ -603,17 +771,74 @@ class BOBOProcessor:
                 destination = os.path.join(processed_dir, filename)
                 destination = self._normalize_path(destination)
             
-            # Move the file
-            shutil.move(filepath, destination)
-            self.logger.info(f"Moved processed file: {filepath} -> {destination}")
-            return True
+            # Step 1: Copy file to destination (preserves metadata)
+            try:
+                shutil.copy2(filepath, destination)
+                self.logger.debug(f"Copied file to processed directory: {filepath} -> {destination}")
+            except PermissionError as e:
+                self.logger.error(
+                    f"PERMISSION ERROR: Cannot copy file to {destination}. "
+                    f"Check write permissions on processed directory. Error: {e}"
+                )
+                return False
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to copy file {filepath} to {destination}: {type(e).__name__}: {e}"
+                )
+                return False
+            
+            # Step 2: Delete source file
+            try:
+                # Check delete permission before attempting
+                source_dir = os.path.dirname(filepath)
+                if not os.access(source_dir, os.W_OK):
+                    raise PermissionError(
+                        f"No write permission on source directory {source_dir} to delete file"
+                    )
+                
+                os.remove(filepath)
+                self.logger.info(f"Successfully moved processed file: {filepath} -> {destination}")
+                return True
+                
+            except PermissionError as e:
+                # Copy succeeded but delete failed - this is the problematic scenario
+                self.logger.error(
+                    f"PERMISSION ERROR: File copied to {destination} but cannot delete source {filepath}. "
+                    f"File now exists in BOTH locations. This usually indicates insufficient permissions "
+                    f"on the source file or parent directory. "
+                    f"ACTION REQUIRED: Manually delete {filepath} or fix permissions. Error: {e}"
+                )
+                # Log additional diagnostic info
+                try:
+                    source_stat = os.stat(filepath)
+                    source_dir_stat = os.stat(source_dir)
+                    self.logger.debug(
+                        f"Source file permissions: {oct(source_stat.st_mode)}, "
+                        f"Source directory permissions: {oct(source_dir_stat.st_mode)}"
+                    )
+                except Exception:
+                    pass
+                return False
+                
+            except Exception as e:
+                # Other error during delete
+                self.logger.error(
+                    f"File copied to {destination} but failed to delete source {filepath}. "
+                    f"File may exist in both locations. Error: {type(e).__name__}: {e}"
+                )
+                return False
             
         except Exception as e:
-            self.logger.error(f"Failed to move processed file {filepath}: {e}")
+            self.logger.error(
+                f"Unexpected error moving processed file {filepath}: {type(e).__name__}: {e}"
+            )
             return False
     
     def move_to_failed_directory(self, filepath: str) -> bool:
         """Move persistently failing file to failed directory
+        
+        Uses a two-step process (copy then delete) to better handle permission errors
+        and provide more meaningful error messages.
         
         Args:
             filepath: Path to the CSV file that failed repeatedly
@@ -622,15 +847,43 @@ class BOBOProcessor:
             True if file was moved successfully, False if error occurred
         """
         try:
+            # Normalize source path
+            filepath = self._normalize_path(filepath)
+            
+            # Check if source file exists and is readable
+            if not os.path.exists(filepath):
+                self.logger.warning(f"Source file does not exist: {filepath}")
+                return False
+            
+            if not os.access(filepath, os.R_OK):
+                self.logger.error(
+                    f"PERMISSION ERROR: Cannot read source file {filepath}. "
+                    f"Check read permissions on the file and parent directory."
+                )
+                return False
+            
             # Create failed directory if it doesn't exist
             failed_dir = self.config['failed_files_directory']
             if not os.path.isabs(failed_dir):
                 failed_dir = os.path.join(os.path.dirname(__file__), failed_dir)
             failed_dir = self._normalize_path(failed_dir)
-            os.makedirs(failed_dir, exist_ok=True)
             
-            # Normalize source path
-            filepath = self._normalize_path(filepath)
+            try:
+                os.makedirs(failed_dir, exist_ok=True)
+            except PermissionError as e:
+                self.logger.error(
+                    f"PERMISSION ERROR: Cannot create/write to failed directory {failed_dir}. "
+                    f"Check write permissions on the directory. Error: {e}"
+                )
+                return False
+            
+            # Check write permissions on failed directory
+            if not os.access(failed_dir, os.W_OK):
+                self.logger.error(
+                    f"PERMISSION ERROR: No write permission on failed directory {failed_dir}. "
+                    f"Check write permissions on the directory."
+                )
+                return False
             
             # Get filename and construct destination path
             filename = os.path.basename(filepath)
@@ -645,21 +898,63 @@ class BOBOProcessor:
                 destination = os.path.join(failed_dir, filename)
                 destination = self._normalize_path(destination)
             
-            # Move the file
-            shutil.move(filepath, destination)
-            self.logger.warning(f"Moved persistently failing file to failed directory: {filename}")
-            return True
+            # Step 1: Copy file to destination
+            try:
+                shutil.copy2(filepath, destination)
+                self.logger.debug(f"Copied file to failed directory: {filepath} -> {destination}")
+            except PermissionError as e:
+                self.logger.error(
+                    f"PERMISSION ERROR: Cannot copy file to failed directory {destination}. "
+                    f"Check write permissions. Error: {e}"
+                )
+                return False
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to copy file {filepath} to failed directory {destination}: {type(e).__name__}: {e}"
+                )
+                return False
+            
+            # Step 2: Delete source file
+            try:
+                source_dir = os.path.dirname(filepath)
+                if not os.access(source_dir, os.W_OK):
+                    raise PermissionError(
+                        f"No write permission on source directory {source_dir} to delete file"
+                    )
+                
+                os.remove(filepath)
+                self.logger.warning(f"Moved persistently failing file to failed directory: {filename}")
+                return True
+                
+            except PermissionError as e:
+                self.logger.error(
+                    f"PERMISSION ERROR: File copied to failed directory {destination} but cannot delete source {filepath}. "
+                    f"File now exists in BOTH locations. ACTION REQUIRED: Manually delete {filepath} or fix permissions. "
+                    f"Error: {e}"
+                )
+                return False
+                
+            except Exception as e:
+                self.logger.error(
+                    f"File copied to failed directory {destination} but failed to delete source {filepath}. "
+                    f"File may exist in both locations. Error: {type(e).__name__}: {e}"
+                )
+                return False
             
         except Exception as e:
-            self.logger.error(f"Failed to move file to failed directory {filepath}: {e}")
+            self.logger.error(
+                f"Unexpected error moving file to failed directory {filepath}: {type(e).__name__}: {e}"
+            )
             return False
     
     def parse_csv_file(self, filepath: str) -> List[BOBOEntry]:
         """Parse a single CSV file and return BOBO entries"""
+        self.logger.debug(f"Entering parse_csv_file(filepath='{filepath}')")
         entries = []
         
         try:
             filepath = self._normalize_path(filepath)
+            self.logger.debug(f"Opening CSV file: {filepath}")
             with open(filepath, 'r', newline='', encoding='utf-8') as csvfile:
                 reader = csv.reader(csvfile)
                 
@@ -677,9 +972,11 @@ class BOBOProcessor:
                         
         except Exception as e:
             self.logger.error(f"Error reading CSV file {filepath}: {e}")
+            self.logger.debug(f"Exiting parse_csv_file() - failure: {e}")
             raise
         
         self.logger.info(f"Parsed {len(entries)} entries from {filepath}")
+        self.logger.debug(f"Exiting parse_csv_file() - success ({len(entries)} entries)")
         return entries
     
     def update_user_duty_status(self, username: str, is_on_duty: bool, 
@@ -717,17 +1014,22 @@ class BOBOProcessor:
         Returns:
             Tuple of (success_count, error_count)
         """
+        self.logger.debug(f"Entering batch_update_duty_status(duty_updates={len(duty_updates)} items, duty_status_field='{duty_status_field}')")
         if not duty_updates:
+            self.logger.debug("Exiting batch_update_duty_status() - no updates to process")
             return 0, 0
         
         # Prepare batch data
+        self.logger.debug("Preparing batch data for duty status updates...")
         batch_data = []
+        skipped_count = 0
         for update in duty_updates:
             username = update.get("username")
             is_on_duty = update.get("is_on_duty")
             event_datetime = update.get("datetime")
             
             if not username:
+                skipped_count += 1
                 continue
             
             duty_datetime = self.format_datetime_for_athoc(event_datetime) if is_on_duty and event_datetime else None
@@ -736,8 +1038,13 @@ class BOBOProcessor:
                 "duty_datetime": duty_datetime
             })
         
+        if skipped_count > 0:
+            self.logger.debug(f"Skipped {skipped_count} updates due to missing username")
+        self.logger.debug(f"Prepared {len(batch_data)} valid updates for batch processing")
+        
         try:
             # Use the batch update method from AtHoc client
+            self.logger.debug(f"Calling AtHoc batch_update_duty_status with {len(batch_data)} updates...")
             results = self.athoc_client.batch_update_duty_status(batch_data, duty_status_field)
             
             success_count = sum(1 for success in results.values() if success)
@@ -759,6 +1066,7 @@ class BOBOProcessor:
         Returns:
             Dictionary with batch processing results
         """
+        self.logger.debug(f"Entering process_file_batch(batch_files={len(batch_files)} files, duty_status_field='{duty_status_field}')")
         # Store file data with user tracking
         file_data = {}
         all_entries = []
@@ -960,7 +1268,7 @@ class BOBOProcessor:
                                                f"Retry attempt {retry_count}/{self.max_retry_attempts}: {data.get('file_error_reason', 'Unknown error')}")
                     self.logger.warning(f"File failed (attempt {retry_count}/{self.max_retry_attempts}) - keeping for retry: {filename}")
         
-        return {
+        result = {
             'entries_processed': total_entries_processed,
             'success_count': batch_success_count,
             'error_count': batch_error_count,
@@ -968,10 +1276,14 @@ class BOBOProcessor:
             'files_failed': files_failed,
             'file_results': {path: data['file_success'] for path, data in file_data.items()}
         }
+        self.logger.debug(f"Exiting process_file_batch() - entries: {total_entries_processed}, success: {batch_success_count}, errors: {batch_error_count}, moved: {files_moved}, failed: {files_failed}")
+        return result
 
     def process_directory(self):
         """Process all CSV files in configured directory with proper batching"""
+        self.logger.debug("Entering process_directory()")
         directory = self.config['csv_directory']
+        self.logger.debug(f"Processing directory: {directory}")
         duty_status_field = self.config['duty_status_field']
         
         # Convert relative path to absolute if needed
@@ -992,8 +1304,9 @@ class BOBOProcessor:
         csv_files = self.get_csv_files(directory)
         if not csv_files:
             self.logger.info("No CSV files found to process")
-            # Still run auto-cleanup even if no CSV files
+            # Still run auto-cleanup and file purging even if no CSV files
             self.auto_cleanup_old_duty_status(duty_status_field)
+            self._purge_old_processed_files()
             return
         
         # Process files in batches
@@ -1027,6 +1340,9 @@ class BOBOProcessor:
         # Auto-cleanup old duty status (when CSV files were processed)
         self.auto_cleanup_old_duty_status(duty_status_field)
         
+        # Purge old processed files
+        self._purge_old_processed_files()
+        
         # Final summary
         self.logger.info(f"Processing complete: {total_processed} entries processed, "
                         f"{total_success} successful updates, {total_errors} errors, "
@@ -1035,6 +1351,7 @@ class BOBOProcessor:
 
     def auto_cleanup_old_duty_status(self, duty_status_field: str = "DUTY_STATUS"):
         """Auto-cleanup users with old duty status timestamps"""
+        self.logger.debug(f"Entering auto_cleanup_old_duty_status(duty_status_field='{duty_status_field}')")
         try:
             # Ensure auto-cleanup runs even if no CSV files were processed
             cleared_count = self.athoc_client.clear_old_duty_status(
@@ -1066,6 +1383,7 @@ def main():
         print(f"User Attributes: {', '.join(processor.config['user_attributes'])}")
         print(f"Processed Directory: {processor.config['processed_directory']}")
         print(f"Move Processed Files: {processor.config['move_processed_files']}")
+        print(f"Processed Files Purge Days: {processor.config['processed_files_purge_days']}")
         print(f"Log Directory: {processor.config['log_directory']}")
         print(f"Log Purge Days: {processor.config['log_purge_days']}")
         print("-" * 50)

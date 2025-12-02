@@ -10,14 +10,26 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Load environment variables from .env file
+# Load environment variables from .env file with secure encryption support
 try:
-    from dotenv import load_dotenv
-    # Load .env file from the same directory as this script
+    from secure_env import load_secure_env
+    # Load and decrypt .env file (automatically encrypts sensitive fields on first run)
     env_path = Path(__file__).parent / '.env'
-    load_dotenv(env_path)
+    secure_config = load_secure_env(env_path, auto_encrypt=True)
+    # Set environment variables for compatibility with existing code
+    import os
+    for key, value in secure_config.items():
+        if value is not None:
+            os.environ[key] = value
 except ImportError:
-    print("WARNING: python-dotenv not installed. Environment variables must be set manually.")
+    # Fallback to standard dotenv if secure_env not available
+    try:
+        from dotenv import load_dotenv
+        env_path = Path(__file__).parent / '.env'
+        load_dotenv(env_path)
+        print("WARNING: Using standard .env loading (secure_env not available). Install cryptography for encryption support.")
+    except ImportError:
+        print("WARNING: python-dotenv not installed. Environment variables must be set manually.")
 except Exception as e:
     print(f"WARNING: Could not load .env file: {e}")
 
@@ -65,10 +77,16 @@ class AtHocClient:
     
     def __init__(self):
         # Remove role loading attempt - not needed for core functionality
+        import logging
+        logger = logging.getLogger('BOBOProcessor')
+        logger.debug("Entering AtHocClient.__init__()")
         self.session = self._create_session()
+        logger.debug("Session created, obtaining authentication token...")
         self.token = self._get_auth_token()
         if not self.token:
+            logger.error("Failed to get AtHoc authentication token")
             raise Exception("Failed to get AtHoc authentication token")
+        logger.debug("AtHocClient initialized successfully")
             
         self.headers = {
             "Authorization": f"Bearer {self.token}",
@@ -121,6 +139,9 @@ class AtHocClient:
     )
     def _get_auth_token(self) -> str:
         """Get authentication token from AtHoc"""
+        import logging
+        logger = logging.getLogger('BOBOProcessor')
+        logger.debug("Entering _get_auth_token()")
         required_vars = {
             "ATHOC_SERVER_URL": os.getenv("ATHOC_SERVER_URL"),
             "CLIENT_ID": os.getenv("CLIENT_ID"),
@@ -150,7 +171,9 @@ class AtHocClient:
         
         token_info = response.json()
         if access_token := token_info.get("access_token"):
+            logger.debug("Exiting _get_auth_token() - success")
             return access_token
+        logger.error("Auth token not found in response")
         raise ValueError("Auth token not found in response")
 
     def get_alerts(self, start_date: str, end_date: str) -> List[Dict]:

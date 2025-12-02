@@ -171,6 +171,10 @@ simulator/output/
 !.env.example
 !.env_safe
 
+# Encryption key file (NEVER commit this!)
+# Stored in user's home directory (~/.bobo_encryption_key)
+.bobo_encryption_key
+
 # Log files
 *.log
 
